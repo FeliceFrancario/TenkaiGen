@@ -1,11 +1,12 @@
 node_modules
 node_modules/
 
-# Next.js build output
+
 .next/
+
 out/
 
-# Env files (keep secrets out of git)
+
 .env
 .env.local
 .env.*.local

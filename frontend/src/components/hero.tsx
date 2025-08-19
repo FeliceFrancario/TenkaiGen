@@ -106,7 +106,7 @@ export function Hero() {
             particleDensity={200}
             className="absolute inset-0 w-full h-full z-0 pointer-events-none"
             particleColor="#D4AF37"
-            speed={0.25}
+            speed={0.3}
           />
         </div>
         <p className="relative z-10 text-sm md:text-base text-white/70">Start with a prompt or choose a product first — your design, your flow.</p>
@@ -115,7 +115,7 @@ export function Hero() {
       {/* Input Section */}
       <div className="max-w-3xl mx-auto mt-10 fade-in-up" style={{ animationDelay: '80ms' }}>
         {/* Chat-like Input - single inline row */}
-        <div className="relative rounded-2xl bg-white/[0.02] backdrop-blur-xl transition-all border border-red-600/30 hover:border-red-500/40 focus-within:border-red-400/50 focus-within:ring-1 focus-within:ring-tenkai-gold/40 shadow-[0_20px_80px_rgba(0,0,0,0.35)]">
+        <div className="relative rounded-2xl bg-white/[0.02] backdrop-blur-xl transition-all border border-red-600/30 hover:border-red-500/40 focus-within:border-red-400/50 focus-within:ring-1 focus-within:ring-tenkai-gold/40 shadow-[0_20px_80px_rgba(0,0,0,0.35)] shadow-[0_8px_30px_rgba(212,175,55,0.12)]">
           <div className="flex items-center gap-2 px-2 py-2">
             <button
               type="button"
@@ -146,10 +146,10 @@ export function Hero() {
               type="button"
               onClick={onSend}
               disabled={!prompt.trim() && attachments.length === 0}
-              className="ml-2 btn-shimmer inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-tenkai-gold/20 to-red-500/20 text-white hover:from-tenkai-gold/30 hover:to-red-500/30 shadow-[0_8px_30px_rgba(212,175,55,0.12)]"
+              className="ml-2 btn-shimmer inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-tenkai-gold via-tenkai-gold/50 to-red-500/50 text-white hover:from-tenkai-gold/30 hover:to-red-500/30 shadow-[0_8px_30px_rgba(212,175,55,0.12)]"
             >
               <GiMagicBroom className="w-4 h-4" />
-              <span>Create</span>
+              <span className="text-lg font-semibold">Create</span>
             </button>
           </div>
         </div>
