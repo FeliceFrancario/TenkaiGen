@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { Providers } from '@/components/providers'
@@ -10,7 +10,11 @@ export const metadata: Metadata = {
   description: 'Generate, customize, and order unique apparel and accessories with AI-assisted designs',
   keywords: 'AI, print-on-demand, custom apparel, design generation, t-shirts, hoodies',
   authors: [{ name: 'TenkaiGen Team' }],
-  viewport: 'width=device-width, initial-scale=1',
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 }
 
 export default function RootLayout({

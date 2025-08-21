@@ -13,7 +13,7 @@ export function Hero() {
   const [attachments, setAttachments] = useState<File[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
-  const { setPrompt: setFlowPrompt, setShortcutMode, setGenerating, setProduct, setStyle, setFranchise } = useFlow()
+  const { setPrompt: setFlowPrompt, setShortcutMode, setGenerating, setProduct, setStyle, setFranchise, setExpandedPrompt } = useFlow()
 
   // Typewriter headline
   const phrases = [
@@ -72,42 +72,37 @@ export function Hero() {
       setFlowPrompt(prompt.trim())
       setShortcutMode(true)
       setGenerating(true)
+      setExpandedPrompt(undefined)
+      setFranchise(undefined)
       console.debug('[hero] onSend start', { prompt: prompt.trim(), attachments: attachments.length })
-      const res = await fetch('/api/parse-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
-      })
-      let data: { productSlug?: string | null; productName?: string | null; expandedPrompt?: string; suggestedStyle?: string | null; franchise?: string | null } | null = null
-      if (res.ok) {
-        console.debug('[hero] parse-prompt OK', { status: res.status })
-        data = await res.json()
-        console.debug('[hero] parse-prompt JSON', data)
-      } else {
-        console.warn('[hero] parse-prompt non-OK', { status: res.status })
-      }
-      if (data?.expandedPrompt) {
-        setFlowPrompt(data.expandedPrompt)
-      }
-      if (data?.franchise) {
-        setFranchise(data.franchise)
-      }
-      if (data?.suggestedStyle) {
-        setStyle(data.suggestedStyle)
-      }
-      const slug = data?.productSlug || null
-      const name = data?.productName || null
-      console.debug('[hero] routing decision', { slug, name })
-      if (slug && name) {
-        setProduct(slug, name)
-        router.push(`/product/${slug}`)
-      } else {
-        router.push('/categories')
-      }
+      // Navigate immediately; parsing runs in background
+      router.push('/categories')
+
+      ;(async () => {
+        try {
+          const res = await fetch('/api/parse-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt }),
+          })
+          if (!res.ok) {
+            console.warn('[hero] parse-prompt non-OK', { status: res.status })
+            return
+          }
+          const data: { productSlug?: string | null; productName?: string | null; expandedPrompt?: string; suggestedStyle?: string | null; franchise?: string | null } = await res.json()
+          console.debug('[hero] parse-prompt JSON (bg)', data)
+          if (data.expandedPrompt) setExpandedPrompt(data.expandedPrompt)
+          if (data.franchise) setFranchise(data.franchise)
+          else setFranchise(undefined)
+          if (data.suggestedStyle) setStyle(data.suggestedStyle)
+          if (data.productSlug && data.productName) setProduct(data.productSlug, data.productName)
+        } catch (e) {
+          console.error('[hero] parse-prompt bg error', e)
+        }
+      })()
     } catch (e) {
       console.error('[hero] onSend error', e)
-      // Fallback: go to categories to continue manually
-      router.push('/categories')
+      // Already navigating; nothing else to do
     }
   }
 

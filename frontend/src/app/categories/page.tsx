@@ -5,6 +5,20 @@ import { PRODUCTS } from '@/lib/data'
 import BackHomeBar from '@/components/back-home-bar'
 import { useFlow } from '@/components/flow-provider'
 
+type Group = {
+  title: string
+  description: string
+  slugs: string[]
+}
+
+const GROUPS: Group[] = [
+  { title: "Men's Clothing", description: 'Popular apparel picks', slugs: ['t-shirts', 'hoodies', 'hats'] },
+  { title: "Women's Clothing", description: 'On-trend fits', slugs: ['t-shirts', 'hoodies', 'hats'] },
+  { title: 'Kids', description: 'Comfy and durable', slugs: ['t-shirts', 'hoodies'] },
+  { title: 'Accessories', description: 'Daily carry & more', slugs: ['totes', 'phone-cases', 'stickers', 'hats'] },
+  { title: 'Home & Living', description: 'Mugs, posters, and decor', slugs: ['mugs', 'posters'] },
+]
+
 export default function CategoriesPage() {
   const { shortcutMode, isGenerating, prompt } = useFlow()
   return (
@@ -19,17 +33,31 @@ export default function CategoriesPage() {
       )}
       <h1 className="text-3xl font-semibold mb-6">Categories</h1>
       <p className="text-white/60 mb-8">Pick a category to start the product → style → prompt flow.</p>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {PRODUCTS.map((p) => (
-          <Link
-            key={p.slug}
-            href={`/product/${p.slug}`}
-            className="group relative rounded-xl border border-white/10 bg-white/[0.04] p-4 text-center transition-colors hover:border-white/20 hover:bg-white/[0.06]"
-          >
-            <div className="absolute inset-0 rounded-xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity btn-shimmer" />
-            <div className="font-medium">{p.name}</div>
-            <div className="text-xs text-white/60 mt-1">{p.variants.length} variants</div>
-          </Link>
+      <div className="space-y-10">
+        {GROUPS.map((g) => (
+          <section key={g.title}>
+            <div className="mb-3">
+              <h2 className="text-xl font-semibold">{g.title}</h2>
+              <p className="text-white/60 text-sm">{g.description}</p>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {g.slugs.map((slug) => {
+                const p = PRODUCTS.find((x) => x.slug === slug)
+                if (!p) return null
+                return (
+                  <Link
+                    key={p.slug}
+                    href={`/product/${p.slug}?from=categories`}
+                    className="group relative rounded-xl border border-white/10 bg-white/[0.04] p-4 text-center transition-colors hover:border-white/20 hover:bg-white/[0.06]"
+                  >
+                    <div className="absolute inset-0 rounded-xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity btn-shimmer" />
+                    <div className="font-medium">{p.name}</div>
+                    <div className="text-xs text-white/60 mt-1">{p.variants.length} variants</div>
+                  </Link>
+                )
+              })}
+            </div>
+          </section>
         ))}
       </div>
     </main>

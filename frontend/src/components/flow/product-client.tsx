@@ -2,24 +2,62 @@
 
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { getProductBySlug } from '@/lib/data'
 import { useFlow } from '@/components/flow-provider'
 import BackHomeBar from '@/components/back-home-bar'
 
 export default function ProductClient({ slug }: { slug: string }) {
   const router = useRouter()
-  const { setProduct, setVariant, setStyle, productSlug, variant, prompt, shortcutMode, isGenerating } = useFlow()
+  const search = useSearchParams()
+  const {
+    setProduct,
+    setVariant,
+    setStyle,
+    setShortcutMode,
+    setGenerating,
+    setExpandedPrompt,
+    setFranchise,
+    setPrompt,
+    setColor,
+    setPrintArea,
+    setSize,
+    productSlug,
+    variant,
+    prompt,
+    shortcutMode,
+    isGenerating,
+  } = useFlow()
   const product = getProductBySlug(slug)
 
   const [selected, setSelected] = useState<string>(variant || '')
+  const [color, setColorLocal] = useState<string>('')
+  const [area, setAreaLocal] = useState<'Front' | 'Back' | ''>('')
+  const [size, setSizeLocal] = useState<string>('')
 
   useEffect(() => {
     if (product && productSlug !== product.slug) {
       setProduct(product.slug, product.name)
     }
+    // If arriving from categories explicitly, exit shortcut mode and clear previous prompt/expanded
+    if (search?.get('from') === 'categories' && !shortcutMode) {
+      setShortcutMode(false)
+      setGenerating(false)
+      setExpandedPrompt(undefined)
+      setFranchise(undefined)
+      setPrompt('')
+      setStyle('')
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug])
+
+  // Initialize defaults for details
+  useEffect(() => {
+    if (!product) return
+    if (!color && product.colors && product.colors.length) setColorLocal(product.colors[0])
+    if (!area && product.printAreas && product.printAreas.length) setAreaLocal(product.printAreas[0])
+    if (!size && product.sizes && product.sizes.length) setSizeLocal(product.sizes[0])
+  }, [product])
 
   if (!product) {
     return (
@@ -36,9 +74,12 @@ export default function ProductClient({ slug }: { slug: string }) {
   const handleContinue = () => {
     if (!selected) return
     setVariant(selected)
+    // Persist details to flow
+    setColor(color || undefined)
+    setPrintArea((area as any) || undefined)
+    setSize(size || undefined)
     if (shortcutMode) {
-      // Skip style in shortcut mode, go straight to prompt/generating view
-      setStyle('Standard')
+      // Do not force style; it will be set by LLM or default on prompt page
       router.push(`/product/${product.slug}/prompt`)
     } else {
       router.push(`/product/${product.slug}/style`)
@@ -82,6 +123,46 @@ export default function ProductClient({ slug }: { slug: string }) {
             <div className="text-xs text-white/60 mt-1">High quality • Fast fulfillment</div>
           </button>
         ))}
+      </div>
+
+      {/* Product details */}
+      <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
+          <div className="text-sm text-white/60 mb-2">Base color</div>
+          <div className="flex flex-wrap gap-2">
+            {(product.colors || ['Black','White']).map((c) => (
+              <button
+                key={c}
+                onClick={() => setColorLocal(c)}
+                className={`px-3 py-1.5 rounded-lg border text-sm ${color===c ? 'border-amber-400/40 bg-white/[0.08]' : 'border-white/10 hover:border-white/20 bg-white/[0.04]'}`}
+              >{c}</button>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
+          <div className="text-sm text-white/60 mb-2">Print area</div>
+          <div className="flex flex-wrap gap-2">
+            {(product.printAreas || ['Front']).map((a) => (
+              <button
+                key={a}
+                onClick={() => setAreaLocal(a)}
+                className={`px-3 py-1.5 rounded-lg border text-sm ${area===a ? 'border-amber-400/40 bg-white/[0.08]' : 'border-white/10 hover:border-white/20 bg-white/[0.04]'}`}
+              >{a}</button>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
+          <div className="text-sm text-white/60 mb-2">Size</div>
+          <div className="flex flex-wrap gap-2">
+            {(product.sizes || ['S','M','L']).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSizeLocal(s)}
+                className={`px-3 py-1.5 rounded-lg border text-sm ${size===s ? 'border-amber-400/40 bg-white/[0.08]' : 'border-white/10 hover:border-white/20 bg-white/[0.04]'}`}
+              >{s}</button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="mt-8 flex gap-3">
