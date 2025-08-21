@@ -41,7 +41,7 @@ export async function POST(req: Request) {
   let incomingSlug: string | null = null
   let incomingStyleRaw: string | null = null
   try {
-    console.log('[parse-prompt] LLM enabled (Gemini):', Boolean(process.env.GEMINI_API_KEY))
+    console.log('[parse-prompt] LLM enabled:', Boolean(process.env.LLM_API_KEY || process.env.GEMINI_API_KEY))
     const body = await req.json()
     prompt = (body?.prompt || '').toString()
     console.debug('[parse-prompt] body parsed', { promptLen: prompt.length, hasPrompt: Boolean(prompt.trim()) })
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
     }
 
     // If no API key, use heuristic fallback
-    if (!process.env.GEMINI_API_KEY) {
+    if (!(process.env.LLM_API_KEY || process.env.GEMINI_API_KEY)) {
       const hit = detectProduct(prompt)
       console.warn('[parse-prompt] no GEMINI_API_KEY, heuristic fallback', { hit })
       return NextResponse.json({
@@ -126,35 +126,105 @@ JSON Schema:
       expandedPrompt: z.string().min(1).describe('Refined detailed prompt suitable for an image generator'),
     })
 
-    const openai = new OpenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-      baseURL: process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai',
-    })
+    const apiKey = process.env.LLM_API_KEY || process.env.GEMINI_API_KEY as string
+    const baseURL = process.env.LLM_BASE_URL || process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai'
+    const openai = new OpenAI({ apiKey, baseURL })
 
     const responseFormat = zodResponseFormat(schema, 'ParsePrompt')
-    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
-    console.debug('[parse-prompt] invoking Gemini via OpenAI SDK', { model })
-    const completion = await openai.chat.completions.create({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt },
-      ],
-      response_format: responseFormat,
-      temperature: 0.2,
-    })
+    const model = process.env.LLM_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+    const provider = baseURL.includes('googleapis')
+      ? 'Google'
+      : baseURL.includes('groq.com')
+      ? 'Groq'
+      : baseURL.includes('openrouter.ai')
+      ? 'OpenRouter'
+      : 'Unknown'
+    console.debug('[parse-prompt] invoking via OpenAI SDK', { provider, model })
+
+    let completion:
+      | Awaited<ReturnType<typeof openai.chat.completions.create>>
+      | null = null
+
+    // Prefer json_schema for Google/Gemini; json_object for Groq/OpenRouter.
+    const preferSchema = provider === 'Google' || /^gemini-/i.test(model)
+    const tryJsonObjectFirst = provider === 'Groq' || provider === 'OpenRouter'
+
+    const runRequest = async (format: 'schema' | 'object' | 'none') => {
+      const rf: any =
+        format === 'schema'
+          ? responseFormat
+          : format === 'object'
+          ? { type: 'json_object' }
+          : undefined
+      return openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt },
+        ],
+        ...(rf ? { response_format: rf } : {}),
+        temperature: 0.2,
+      } as any)
+    }
+
+    try {
+      if (tryJsonObjectFirst) {
+        // e.g., Groq/OpenRouter
+        completion = await runRequest('object')
+      } else if (preferSchema) {
+        completion = await runRequest('schema')
+      } else {
+        completion = await runRequest('object')
+      }
+    } catch (err: any) {
+      const msg = String(err?.message || err)
+      console.warn('[parse-prompt] first attempt failed, retrying with fallback', { provider, msg })
+      try {
+        if (preferSchema) {
+          // If schema failed (e.g., Groq 400), retry with json_object
+          completion = await runRequest('object')
+        } else {
+          // Retry with no response_format and rely on strict prompting
+          completion = await runRequest('none')
+        }
+      } catch (err2) {
+        console.error('[parse-prompt] second attempt failed', { provider, err2 })
+        throw err2
+      }
+    }
 
     const content = completion.choices?.[0]?.message?.content
     if (!content) {
-      console.error('[parse-prompt] no content from Gemini', completion)
-      throw new Error('No content from Gemini')
+      console.error('[parse-prompt] no content from LLM', completion)
+      throw new Error('No content from LLM')
     }
     let json: unknown
     try {
       json = JSON.parse(content)
     } catch (e) {
-      console.error('[parse-prompt] failed to JSON.parse model content', { content })
-      throw new Error('Model did not return valid JSON')
+      console.warn('[parse-prompt] strict JSON.parse failed, trying extraction fallback')
+      // Try fenced code block first
+      const fence = content.match(/```(?:json)?\s*([\s\S]*?)```/i)
+      if (fence && fence[1]) {
+        try {
+          json = JSON.parse(fence[1].trim())
+        } catch {}
+      }
+      // Try first balanced braces slice as last resort
+      if (!json) {
+        const first = content.indexOf('{')
+        const last = content.lastIndexOf('}')
+        if (first !== -1 && last !== -1 && last > first) {
+          const slice = content.slice(first, last + 1)
+          try {
+            json = JSON.parse(slice)
+          } catch {}
+        }
+      }
+      if (!json) {
+        console.error('[parse-prompt] failed to extract JSON from content', { content })
+        throw new Error('Model did not return valid JSON')
+      }
     }
     const parsed = schema.safeParse(json)
     if (!parsed.success) {
