@@ -8,14 +8,14 @@ export type FlowContextValue = {
   variant?: string
   style?: string
   prompt?: string
-  negativePrompt?: string
+  franchise?: string
   shortcutMode: boolean
   isGenerating: boolean
   setProduct: (slug: string, name: string) => void
   setVariant: (v: string) => void
   setStyle: (s: string) => void
   setPrompt: (p: string) => void
-  setNegativePrompt: (n: string) => void
+  setFranchise: (f: string | undefined) => void
   setShortcutMode: (on: boolean) => void
   setGenerating: (on: boolean) => void
   reset: () => void
@@ -29,7 +29,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const [variant, setVariant] = useState<string | undefined>()
   const [style, setStyle] = useState<string | undefined>()
   const [prompt, setPromptState] = useState<string | undefined>()
-  const [negativePrompt, setNegativePromptState] = useState<string | undefined>()
+  const [franchise, setFranchiseState] = useState<string | undefined>()
   const [shortcutMode, setShortcutMode] = useState(false)
   const [isGenerating, setGenerating] = useState(false)
 
@@ -39,7 +39,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   }
 
   const setPrompt = (p: string) => setPromptState(p)
-  const setNegativePrompt = (n: string) => setNegativePromptState(n)
+  const setFranchise = (f: string | undefined) => setFranchiseState(f)
 
   const reset = () => {
     setProductSlug(undefined)
@@ -47,14 +47,14 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     setVariant(undefined)
     setStyle(undefined)
     setPromptState(undefined)
-    setNegativePromptState(undefined)
+    setFranchiseState(undefined)
     setShortcutMode(false)
     setGenerating(false)
   }
 
   const value = useMemo(
-    () => ({ productSlug, productName, variant, style, prompt, negativePrompt, shortcutMode, isGenerating, setProduct, setVariant, setStyle, setPrompt, setNegativePrompt, setShortcutMode, setGenerating, reset }),
-    [productSlug, productName, variant, style, prompt, negativePrompt, shortcutMode, isGenerating]
+    () => ({ productSlug, productName, variant, style, prompt, franchise, shortcutMode, isGenerating, setProduct, setVariant, setStyle, setPrompt, setFranchise, setShortcutMode, setGenerating, reset }),
+    [productSlug, productName, variant, style, prompt, franchise, shortcutMode, isGenerating]
   )
 
   return <FlowContext.Provider value={value}>{children}</FlowContext.Provider>

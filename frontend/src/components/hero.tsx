@@ -13,7 +13,7 @@ export function Hero() {
   const [attachments, setAttachments] = useState<File[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
-  const { setPrompt: setFlowPrompt, setShortcutMode, setGenerating, setProduct, setStyle, setNegativePrompt } = useFlow()
+  const { setPrompt: setFlowPrompt, setShortcutMode, setGenerating, setProduct, setStyle, setFranchise } = useFlow()
 
   // Typewriter headline
   const phrases = [
@@ -78,7 +78,7 @@ export function Hero() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
       })
-      let data: { productSlug?: string | null; productName?: string | null; expandedPrompt?: string; suggestedStyle?: string | null; negativePrompt?: string } | null = null
+      let data: { productSlug?: string | null; productName?: string | null; expandedPrompt?: string; suggestedStyle?: string | null; franchise?: string | null } | null = null
       if (res.ok) {
         console.debug('[hero] parse-prompt OK', { status: res.status })
         data = await res.json()
@@ -89,8 +89,8 @@ export function Hero() {
       if (data?.expandedPrompt) {
         setFlowPrompt(data.expandedPrompt)
       }
-      if (data?.negativePrompt) {
-        setNegativePrompt(data.negativePrompt)
+      if (data?.franchise) {
+        setFranchise(data.franchise)
       }
       if (data?.suggestedStyle) {
         setStyle(data.suggestedStyle)

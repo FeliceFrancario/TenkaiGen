@@ -54,14 +54,26 @@ export async function POST(req: Request) {
       : undefined
     if (!prompt.trim()) {
       console.warn('[parse-prompt] empty prompt, returning early')
-      return NextResponse.json({ productSlug: null, productName: null, expandedPrompt: '' })
+      return NextResponse.json({
+        productSlug: knownProduct?.slug ?? null,
+        productName: knownProduct?.name ?? null,
+        suggestedStyle: knownStyle ?? null,
+        franchise: null,
+        expandedPrompt: '',
+      })
     }
 
     // If no API key, use heuristic fallback
     if (!process.env.GEMINI_API_KEY) {
       const hit = detectProduct(prompt)
       console.warn('[parse-prompt] no GEMINI_API_KEY, heuristic fallback', { hit })
-      return NextResponse.json({ productSlug: hit?.slug ?? null, productName: hit?.name ?? null, expandedPrompt: prompt.trim() })
+      return NextResponse.json({
+        productSlug: knownProduct?.slug ?? hit?.slug ?? null,
+        productName: knownProduct?.name ?? hit?.name ?? null,
+        suggestedStyle: knownStyle ?? null,
+        franchise: null,
+        expandedPrompt: prompt.trim(),
+      })
     }
 
     const productChoices = PRODUCTS.map((p) => `${p.slug} | ${p.name}`).join('\n')
@@ -71,25 +83,47 @@ export async function POST(req: Request) {
       knownStyle ? `Known style: ${knownStyle}` : null,
     ].filter(Boolean).join('\n')
     const systemPrompt = `
-You are an assistant for a print-on-demand design app. Parse a user's free-form prompt and return structured data.
+You are a Prompt Optimizer and Workflow Router for a print-on-demand design app.
+Your job is to take a user's free-form prompt and return structured JSON that both expands the prompt into a high-quality image-generation prompt AND indicates workflow choices (product, style, franchise).
 
 Tasks:
-1) Identify the most likely product from this CLOSED SET (choose ONLY one or none):\n${productChoices}\nReturn its slug and name. If uncertain or none, return null for both.
-2) Suggest a style from this CLOSED SET (choose ONLY one or none): ${styleChoices}. If the user clearly implies a style, choose it; otherwise return null. If a style is provided as KNOWN CONTEXT, you MUST return that style verbatim as suggestedStyle.
-3) Expand and refine the prompt into a single high-quality image-generation prompt. Keep it concise and visual, avoid brand names and copyrighted characters. If the chosen or implied style is "Anime", prefer keyword-rich tokens suitable for anime-focused models. Otherwise, prefer clear natural language. Keep it compatible with various products.
-4) Optionally include a negativePrompt (may be empty) with generic safe negatives, and if style is "Anime", include typical anime negatives (e.g., lowres, bad anatomy, extra fingers, watermark).
+1. Identify the most likely product from this CLOSED SET:\n${productChoices}\nReturn its slug and name. If uncertain or none, return null for both.
+
+2. Identify if the input mentions or implies a specific franchise (anime, games, comics, etc). Examples: "One Piece", "Naruto", "Marvel".
+- If a franchise is detected, output its name in the ` + "`franchise`" + ` field.
+- If none, return null.
+This will be used to decide LoRA attachments (e.g., franchise: "One Piece" → apply One Piece LoRA).
+
+3. Suggest a style from this CLOSED SET:\n${styleChoices}\nIf the user clearly implies a style, choose it; otherwise return null.
+If style is provided in KNOWN CONTEXT, you MUST return it exactly.
+
+4. Expand and refine the user’s prompt into a polished image-generation prompt:
+- IMPORTANT: Never mention the product (t-shirt, hoodie, mug, etc.) in the expanded prompt.
+- If style = "Anime": format as danbooru-style tags (comma-separated, descriptive, detailed).
+- If style = anything else: format as natural language expansion (similar to Qwen examples).
+- Keep it under 200 words.
+- Do not include a negative prompt (workflow will handle that).
+
+5. Output MUST match the JSON schema below, no extra text.
 
 KNOWN CONTEXT (may be empty):
 ${contextNotes || '(none)'}
 
-Output must match the provided JSON schema exactly.`.trim()
+JSON Schema:
+{
+  "productSlug": string | null,
+  "productName": string | null,
+  "suggestedStyle": string | null,
+  "franchise": string | null,
+  "expandedPrompt": string
+}`.trim()
 
     const schema = z.object({
       productSlug: z.string().nullable().describe('One of the allowed slugs or null if not specified'),
       productName: z.string().nullable().describe('Human-readable product name or null if not specified'),
       suggestedStyle: z.string().nullable().describe('One of the allowed styles or null if not specified'),
-      expandedPrompt: z.string().min(1).describe('Refined single-line prompt suitable for an image generator'),
-      negativePrompt: z.string().nullable().describe('Optional negative prompt keywords; may be empty'),
+      franchise: z.string().nullable().describe('Franchise name if detected; otherwise null'),
+      expandedPrompt: z.string().min(1).describe('Refined detailed prompt suitable for an image generator'),
     })
 
     const openai = new OpenAI({
@@ -132,8 +166,8 @@ Output must match the provided JSON schema exactly.`.trim()
       productSlug: result.productSlug,
       productName: result.productName,
       suggestedStyle: result.suggestedStyle,
+      franchise: (result as any).franchise ?? null,
       expandedPromptLen: result?.expandedPrompt?.length || 0,
-      hasNegative: Boolean(result?.negativePrompt),
     })
 
     // Validate result against available products if model hallucinated a slug
@@ -165,14 +199,12 @@ Output must match the provided JSON schema exactly.`.trim()
       outStyle = null
     }
 
-    const negativePrompt = (result as any).negativePrompt || ''
-
     const response = {
       productSlug: outSlug,
       productName: outName,
       suggestedStyle: outStyle,
+      franchise: (result as any).franchise ?? null,
       expandedPrompt: result.expandedPrompt,
-      negativePrompt,
     }
 
     if (process.env.NODE_ENV !== 'production') {
@@ -196,12 +228,12 @@ Output must match the provided JSON schema exactly.`.trim()
         productSlug: productMatch?.slug ?? hit?.slug ?? null,
         productName: productMatch?.name ?? hit?.name ?? null,
         suggestedStyle: styleMatch ?? null,
+        franchise: null,
         expandedPrompt: (prompt || '').toString().trim(),
-        negativePrompt: '',
       })
     } catch (inner) {
       console.error('[parse-prompt] fallback error parsing req body', inner)
-      return NextResponse.json({ productSlug: null, productName: null, suggestedStyle: null, expandedPrompt: '', negativePrompt: '' })
+      return NextResponse.json({ productSlug: null, productName: null, suggestedStyle: null, franchise: null, expandedPrompt: '' })
     }
   }
 }
