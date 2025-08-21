@@ -5,11 +5,15 @@ import { FiX } from 'react-icons/fi'
 import { GiMagicBroom } from 'react-icons/gi'
 import { FaImage } from "react-icons/fa6";
 import { SparklesCore } from '@/components/ui/sparkles'
+import { useRouter } from 'next/navigation'
+import { useFlow } from '@/components/flow-provider'
 
 export function Hero() {
   const [prompt, setPrompt] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const router = useRouter()
+  const { setPrompt: setFlowPrompt, setShortcutMode, setGenerating, setProduct, setStyle, setNegativePrompt } = useFlow()
 
   // Typewriter headline
   const phrases = [
@@ -61,12 +65,50 @@ export function Hero() {
     setAttachments((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const onSend = () => {
+  const onSend = async () => {
     if (!prompt.trim() && attachments.length === 0) return
-    // TODO: hook this up to your generation flow
-    // For now, clear input to reflect submission
-    setPrompt('')
-    setAttachments([])
+    // Start shortcut flow: we parse the prompt to guess a product and begin generating
+    try {
+      setFlowPrompt(prompt.trim())
+      setShortcutMode(true)
+      setGenerating(true)
+      console.debug('[hero] onSend start', { prompt: prompt.trim(), attachments: attachments.length })
+      const res = await fetch('/api/parse-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      })
+      let data: { productSlug?: string | null; productName?: string | null; expandedPrompt?: string; suggestedStyle?: string | null; negativePrompt?: string } | null = null
+      if (res.ok) {
+        console.debug('[hero] parse-prompt OK', { status: res.status })
+        data = await res.json()
+        console.debug('[hero] parse-prompt JSON', data)
+      } else {
+        console.warn('[hero] parse-prompt non-OK', { status: res.status })
+      }
+      if (data?.expandedPrompt) {
+        setFlowPrompt(data.expandedPrompt)
+      }
+      if (data?.negativePrompt) {
+        setNegativePrompt(data.negativePrompt)
+      }
+      if (data?.suggestedStyle) {
+        setStyle(data.suggestedStyle)
+      }
+      const slug = data?.productSlug || null
+      const name = data?.productName || null
+      console.debug('[hero] routing decision', { slug, name })
+      if (slug && name) {
+        setProduct(slug, name)
+        router.push(`/product/${slug}`)
+      } else {
+        router.push('/categories')
+      }
+    } catch (e) {
+      console.error('[hero] onSend error', e)
+      // Fallback: go to categories to continue manually
+      router.push('/categories')
+    }
   }
 
   const onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
@@ -77,11 +119,11 @@ export function Hero() {
   }
 
   return (
-    <section className="pt-28 pb-10 px-4 sm:px-6 lg:px-8 relative">
+    <section className="pt-24 sm:pt-28 pb-10 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
       {/* animated aurora + subtle background glows */}
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute inset-[-20%] animate-aurora opacity-60" />
-        <div className="absolute right-1/5 top-20 w-[22rem] h-[22rem] bg-tenkai-silver/10 blur-[120px] rounded-full" />
+        <div className="absolute right-[20%] top-20 w-[22rem] h-[22rem] bg-tenkai-silver/10 blur-[120px] rounded-full" />
         <div className="absolute right-10 bottom-10 w-[26rem] h-[26rem] bg-red-600/15 blur-[140px] rounded-full float-soft" />
       </div>
 

@@ -15,12 +15,12 @@ export function ProductShowcase() {
   return (
     <section className="py-20 px-4 sm:px-6 lg:px-8 bg-tenkai-dark relative">
       <div className="max-w-7xl mx-auto">
-        <div className="flex items-end justify-between mb-6">
+        <div className="flex items-end justify-between mb-6 flex-wrap gap-3">
           <div>
             <h2 className="text-2xl md:text-3xl font-semibold text-white">High-quality apparel</h2>
             <p className="text-white/50 text-sm">Our community favorites. Click to browse all categories.</p>
           </div>
-          <button onClick={() => router.push('/categories')} className="btn-shimmer px-4 py-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition">Explore all</button>
+          <button onClick={() => router.push('/categories')} className="hidden sm:inline-flex btn-shimmer px-4 py-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition">Explore all</button>
         </div>
 
         {/* edge gradient fades */}
