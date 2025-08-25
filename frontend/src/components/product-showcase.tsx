@@ -20,7 +20,7 @@ export function ProductShowcase() {
             <h2 className="text-2xl md:text-3xl font-semibold text-white">High-quality apparel</h2>
             <p className="text-white/50 text-sm">Our community favorites. Click to browse all categories.</p>
           </div>
-          <button onClick={() => router.push('/categories')} className="hidden sm:inline-flex btn-shimmer px-4 py-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition">Explore all</button>
+          <button onClick={() => router.push('/catalog')} className="hidden sm:inline-flex btn-shimmer px-4 py-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition">Explore all</button>
         </div>
 
         {/* edge gradient fades */}
@@ -32,7 +32,7 @@ export function ProductShowcase() {
             {products.map((p, i) => (
               <div
                 key={i}
-                onClick={() => router.push('/categories')}
+                onClick={() => router.push('/catalog')}
                 className="snap-start w-56 shrink-0 cursor-pointer rounded-2xl bg-white/[0.03] border border-white/10 hover:border-tenkai-gold/40 hover:bg-white/[0.06] transition-all shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_14px_40px_rgba(212,175,55,0.18)] hover:-translate-y-0.5"
               >
                 <div className="h-40 rounded-t-2xl bg-gradient-to-br from-tenkai-silver/20 via-white/10 to-transparent flex items-center justify-center text-5xl">

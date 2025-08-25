@@ -76,7 +76,7 @@ export function Hero() {
       setFranchise(undefined)
       console.debug('[hero] onSend start', { prompt: prompt.trim(), attachments: attachments.length })
       // Navigate immediately; parsing runs in background
-      router.push('/categories')
+      router.push('/catalog')
 
       ;(async () => {
         try {
