@@ -3,8 +3,8 @@ import { headers } from 'next/headers'
 
 export const dynamic = 'force-dynamic'
 
-function absoluteUrl(path: string) {
-  const h = headers()
+async function absoluteUrl(path: string) {
+  const h = await headers()
   const proto = h.get('x-forwarded-proto') ?? 'http'
   const host = h.get('host') ?? 'localhost:3000'
   return `${proto}://${host}${path}`
@@ -24,7 +24,7 @@ const TOP_TITLES = [
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
 
 async function getCategories(): Promise<PfCategory[]> {
-  const res = await fetch(absoluteUrl('/api/printful/categories'), { cache: 'no-store' })
+  const res = await fetch(await absoluteUrl('/api/printful/categories'), { cache: 'no-store' })
   if (!res.ok) return []
   const data = await res.json()
   return (data?.result?.categories || []) as PfCategory[]

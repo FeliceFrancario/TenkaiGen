@@ -1,11 +1,12 @@
 import Image from 'next/image'
+import Link from 'next/link'
 import BackHomeBar from '@/components/back-home-bar'
 import { headers } from 'next/headers'
 
 export const dynamic = 'force-dynamic'
 
-function absoluteUrl(path: string) {
-  const h = headers()
+async function absoluteUrl(path: string) {
+  const h = await headers()
   const proto = h.get('x-forwarded-proto') ?? 'http'
   const host = h.get('host') ?? 'localhost:3000'
   return `${proto}://${host}${path}`
@@ -15,14 +16,14 @@ type PfCategory = { id: number; title: string; image_url: string | null; parent_
 type PfProduct = { id: number; title: string; main_category_id: number; thumbnail: string | null }
 
 async function getCategories(): Promise<PfCategory[]> {
-  const res = await fetch(absoluteUrl(`/api/printful/categories`), { cache: 'no-store' })
+  const res = await fetch(await absoluteUrl(`/api/printful/categories`), { cache: 'no-store' })
   if (!res.ok) return []
   const data = await res.json()
   return (data?.result?.categories || []) as PfCategory[]
 }
 
 async function getProducts(categoryId: number): Promise<PfProduct[]> {
-  const res = await fetch(absoluteUrl(`/api/printful/products?category_id=${categoryId}&limit=24`), { cache: 'no-store' })
+  const res = await fetch(await absoluteUrl(`/api/printful/products?category_id=${categoryId}&limit=24`), { cache: 'no-store' })
   if (!res.ok) return []
   const data = await res.json()
   return (data?.result || []) as PfProduct[]
@@ -103,7 +104,11 @@ export default async function CatalogCategoryPage({ params }: { params: Promise<
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             {products.map((p) => (
-              <div key={p.id} className="group rounded-xl border border-amber-400/20 bg-gradient-to-br from-amber-500/10 via-rose-500/5 to-transparent p-4 text-center hover:border-amber-400/40 hover:shadow-[0_0_30px_rgba(251,191,36,0.25)] transition">
+              <Link
+                key={p.id}
+                href={`/catalog/product/${p.id}`}
+                className="group rounded-xl border border-amber-400/20 bg-gradient-to-br from-amber-500/10 via-rose-500/5 to-transparent p-4 text-center hover:border-amber-400/40 hover:shadow-[0_0_30px_rgba(251,191,36,0.25)] transition"
+              >
                 <div className="font-medium text-sm text-amber-100">{p.title}</div>
                 {p.thumbnail ? (
                   <div className="mt-3 relative w-full aspect-[4/3] rounded overflow-hidden bg-white/5">
@@ -112,8 +117,7 @@ export default async function CatalogCategoryPage({ params }: { params: Promise<
                 ) : (
                   <div className="mt-3 relative w-full aspect-[4/3] rounded bg-white/5" />
                 )}
-                {/* TODO: Link to a product detail page once implemented */}
-              </div>
+              </Link>
             ))}
           </div>
         )

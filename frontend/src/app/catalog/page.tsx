@@ -17,15 +17,15 @@ const TOP_TITLES = [
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
 
-function absoluteUrl(path: string) {
-  const h = headers()
+async function absoluteUrl(path: string) {
+  const h = await headers()
   const proto = h.get('x-forwarded-proto') ?? 'http'
   const host = h.get('host') ?? 'localhost:3000'
   return `${proto}://${host}${path}`
 }
 
 async function getCategories(): Promise<PfCategory[]> {
-  const res = await fetch(absoluteUrl('/api/printful/categories'), { cache: 'no-store' })
+  const res = await fetch(await absoluteUrl('/api/printful/categories'), { cache: 'no-store' })
   if (!res.ok) return []
   const data = await res.json()
   return (data?.result?.categories || []) as PfCategory[]
@@ -41,7 +41,7 @@ export default async function CatalogHome() {
         <h1 className="text-3xl md:text-4xl font-semibold bg-clip-text text-transparent bg-gradient-to-r from-amber-300 to-rose-300 drop-shadow">
           Explore our catalog
         </h1>
-        <p className="text-white/70 mt-2">Choose a category to begin. Luxury styling with gold & crimson accents.</p>
+        <p className="text-white/70 mt-2">Choose a category to begin</p>
 
         <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {topCats.map((c) => (
