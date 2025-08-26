@@ -30,12 +30,19 @@ export async function GET(req: NextRequest) {
     const variants = Array.isArray(result.variants) ? result.variants : []
 
     // Normalize minimal shape for the client
+    const catalogProductId = (product as any)?.product_id
+      || (variants?.[0] as any)?.product?.product_id
+      || (variants?.[0] as any)?.product?.id
+      || null
     const normalized = {
       id: product.id,
+      catalog_product_id: catalogProductId,
       title: product.title || product.name || 'Product',
       description: product.description || '',
       brand: product.brand || null,
       model: product.model || null,
+      // Include main_category_id for breadcrumb construction on product page
+      main_category_id: product.main_category_id || (result as any)?.main_category_id || null,
       sizes: (product.sizes || []).map((s: any) => (typeof s === 'string' ? s : s?.size || s)).filter(Boolean),
       colors: (product.colors || []).map((c: any) => ({
         name: c?.name || c?.title || String(c || ''),

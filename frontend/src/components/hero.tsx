@@ -13,7 +13,7 @@ export function Hero() {
   const [attachments, setAttachments] = useState<File[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
-  const { setPrompt: setFlowPrompt, setShortcutMode, setGenerating, setProduct, setStyle, setFranchise, setExpandedPrompt } = useFlow()
+  const { isGenerating, setPrompt: setFlowPrompt, setShortcutMode, setGenerating, setProduct, setStyle, setFranchise, setExpandedPrompt } = useFlow()
 
   // Typewriter headline
   const phrases = [
@@ -190,6 +190,14 @@ export function Hero() {
             </button>
           </div>
         </div>
+
+        {/* Generating indicator */}
+        {isGenerating && (
+          <div className="mt-3 flex items-center justify-center gap-3 text-sm text-white/80">
+            <span className="inline-block w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+            <span>Creating your design in the background...</span>
+          </div>
+        )}
 
         {/* Attachment chips */}
         {attachments.length > 0 && (

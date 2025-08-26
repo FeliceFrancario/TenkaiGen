@@ -1,4 +1,5 @@
 import { headers } from 'next/headers'
+import Link from 'next/link'
 import BackHomeBar from '@/components/back-home-bar'
 import CatalogProductDetail from '@/components/catalog-product-detail'
 
@@ -48,9 +49,38 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
     )
   }
 
+  // Fetch categories to build breadcrumbs from product.main_category_id
+  type PfCategory = { id: number; title: string; image_url: string | null; parent_id: number }
+  let ancestors: PfCategory[] = []
+  try {
+    const cres = await fetch(await absoluteUrl(`/api/printful/categories`), { cache: 'no-store' })
+    if (cres.ok) {
+      const cdata = await cres.json()
+      const cats: PfCategory[] = (cdata?.result?.categories || []) as PfCategory[]
+      const byId = new Map<number, PfCategory>()
+      for (const c of cats) byId.set(c.id, c)
+      let cur: PfCategory | undefined = byId.get(product.main_category_id as number)
+      while (cur) {
+        ancestors.unshift(cur)
+        cur = byId.get(cur.parent_id)
+      }
+    }
+  } catch {}
+
   return (
     <main className="min-h-[60vh] px-6 py-10 max-w-6xl mx-auto text-white">
       <BackHomeBar />
+      {ancestors.length > 0 && (
+        <div className="mb-4 text-xs text-white/60">
+          {ancestors.map((a, i) => (
+            <span key={a.id} className="[&:not(:last-child)]:after:content-['/'] [&:not(:last-child)]:after:mx-2">
+              <Link href={`/catalog/${a.id}`} className="hover:text-white/80">
+                {a.title}
+              </Link>
+            </span>
+          ))}
+        </div>
+      )}
       <CatalogProductDetail product={product} />
     </main>
   )
