@@ -33,12 +33,13 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
   const { isGenerating, setGenerating } = useFlow()
 
   // Images from v2 endpoint (placement + background info)
-  type PlImage = { placement: string; image_url: string; background_color?: string | null; background_image?: string | null }
+  type PlImage = { placement: string; image_url: string; color_name?: string | null; background_color?: string | null; background_image?: string | null }
   const [plImages, setPlImages] = useState<PlImage[]>([])
   const [placement, setPlacement] = useState<string>('front')
   type ScoredImage = PlImage & { _score: number; _key: string }
   const [allImages, setAllImages] = useState<ScoredImage[]>([])
   const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null)
+  const [imgDims, setImgDims] = useState<{ w: number; h: number } | null>(null)
 
   // Local size sorting since util was removed
   const sortSizesLocal = (arr: string[]) => {
@@ -117,46 +118,53 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
   }
   const normUrl = (u: string) => String(u || '').split('?')[0]
 
+  // Prefer baked (jpg/webp) over transparent (png) assets when available
+  const fileExtRank = (url: string) => {
+    const u = normUrl(url).toLowerCase()
+    if (/(\.jpg|\.jpeg|\.webp)$/.test(u)) return 0
+    if (/\.png$/.test(u)) return 1
+    return 2
+  }
+
+  const isPng = (url?: string | null) => !!url && /\.png($|\?)/i.test(String(url))
+
+  // Model-only filter (remove flat/ghost); fallback to all if none
+  const isModelUrl = (url?: string | null) => {
+    const u = String(url || '').toLowerCase()
+    if (!u) return false
+    if (/flat|ghost/.test(u)) return false
+    return /(onman|onmale|\bmen\b|male|guy|onwoman|onfemale|womens|women\b|female|girl|model|lifestyle)/i.test(u)
+  }
+
+  // Gender helpers and preference
+  const isMaleModel = (url: string) => /(onman\b|\bmen\b|male|guy)/i.test(String(url))
+  const isFemaleModel = (url: string) => /(onwoman|womens|women\b|female|girl)/i.test(String(url))
+  const genderPrefRank = (url: string) => (isMaleModel(url) ? 0 : isFemaleModel(url) ? 1 : 2)
+  // User requested more men models
+  const preferMenModels = true
+
   // Helper: color matching across varying metadata
   const colorMatches = (img: PlImage, selName?: string, selHex?: string | null) => {
     const bgHex = normalizeHex(img.background_color || null)
     if (selHex && bgHex && selHex === bgHex) return true
     if (!selName) return false
-    const synMap: Record<string, string[]> = {
-      black: ['black', 'blk'],
-      white: ['white', 'wht'],
-      red: ['red', 'scarlet', 'cardinal', 'maroon'],
-      blue: ['blue', 'royal', 'cyan'],
-      navy: ['navy', 'navyblue'],
-      green: ['green', 'forest', 'olive'],
-      gray: ['gray', 'grey', 'charcoal', 'athleticheather', 'heathergray', 'darkheather'],
-      pink: ['pink', 'rose'],
-      purple: ['purple', 'violet'],
-      orange: ['orange'],
-      yellow: ['yellow', 'gold'],
-      brown: ['brown', 'chocolate'],
-      cream: ['cream', 'bone', 'oat', 'oatmeal', 'ivory'],
-    }
-    const sanitize = (s: string) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '')
-    const base = sanitize(selName)
-    // Expand simple base->family mapping
-    let family: string[] = []
-    for (const [k, arr] of Object.entries(synMap)) {
-      if (base.includes(k)) { family = arr; break }
-    }
-    const urlSan = sanitize(normUrl(img.image_url || ''))
-    // If any conflicting color tokens from other families are present, reject to avoid false positives (e.g., 'black' in URL)
-    const allFamilies = Object.values(synMap)
-    const flatTokens = allFamilies.flat()
-    const selectedSet = new Set([base, ...family].filter(Boolean))
-    const otherTokens = flatTokens.filter((t) => !selectedSet.has(t))
-    const conflict = otherTokens.some((tok) => tok && urlSan.includes(tok))
-    if (conflict) return false
-    // match base or any synonym token
-    if (base && urlSan.includes(base)) return true
-    for (const tok of family) { if (urlSan.includes(tok)) return true }
+    // Exact color name match from API (most reliable)
+    const imgColor = String(img.color_name || '').trim().toLowerCase()
+    const selColor = String(selName || '').trim().toLowerCase()
+    if (imgColor && selColor && imgColor === selColor) return true
+    // Normalized name equality (generic, no fuzzy tokens)
+    const sanitize = (s: string) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const imgNorm = sanitize(imgColor)
+    const selNorm = sanitize(selColor)
+    if (imgNorm && selNorm && imgNorm === selNorm) return true
     return false
   }
+
+  // Detect if current color selection is heather/textured, so we prefer a background image texture over flat color when using transparent PNGs
+  const isHeatherSelected = useMemo(() => {
+    const n = String(selectedColor || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    return /heather|athleticheather|darkheather|ash|oatmeal|triblend|marble|slub/.test(n)
+  }, [selectedColor])
 
   // Gender context derived from product title and active variant
   const { womensSelected, mensSelected, unisexSelected } = useMemo(() => {
@@ -178,11 +186,19 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
     return `#${h.toUpperCase()}`
   }
   const selectedColorHex = useMemo(() => {
+    const match = colors.find((c) => c.name === selectedColor)
+    const fromSelected = normalizeHex(match?.code || null)
+    if (fromSelected) return fromSelected
     const fromVariant = normalizeHex(activeVariant?.color_code || null)
     if (fromVariant) return fromVariant
-    const match = colors.find((c) => c.name === selectedColor)
-    return normalizeHex(match?.code || null)
-  }, [activeVariant?.color_code, colors, selectedColor])
+    // Fallback: try to infer from any image that carries a background_color for this color
+    const selName = String(selectedColor || '').toLowerCase()
+    const imgMatch = allImages.find((i) => (
+      String(i.color_name || '').toLowerCase() === selName) && !!normalizeHex(i.background_color || null)
+    )
+    const fromImages = normalizeHex(imgMatch?.background_color || null)
+    return fromImages
+  }, [activeVariant?.color_code, colors, selectedColor, allImages])
 
   // Fetch v2 images for placements and gallery
   useEffect(() => {
@@ -215,29 +231,13 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
           // prefer canonical front/back over "_large" only slightly
           const norm = normPlacement(it.placement).key
           if (norm === 'front') s += 1
-          if (womensSelected) {
-            if (/(onwoman|womens|women\b)/i.test(url)) s += 6
-            if (/(onman\b|\bmen\b)/i.test(url)) s -= 3
-          }
-          if (mensSelected) {
-            if (/(onman\b|\bmen\b)/i.test(url)) s += 6
-            if (/(onwoman|womens|women\b)/i.test(url)) s -= 3
-          }
-          if (unisexSelected) {
-            if (/(ghost|flat)/i.test(url)) s += 3
-            if (/onman\b/i.test(url)) s -= 1
-          }
+          // Remove gender/unisex weighting to avoid unintended biases.
           return { ...it, _score: s, _key: norm }
         })
         // Save all scored images for gallery (stable sort by score desc), ensure non-empty src
+        // Do NOT dedupe here; preserve duplicates across colors for same URL
         const allSorted = scored
           .filter((it) => !!(it.image_url && String(it.image_url).trim().length > 0))
-          // Stronger dedupe on base URL (ignore query params)
-          .reduce((acc: ScoredImage[], cur) => {
-            const key = normUrl(cur.image_url)
-            if (!acc.find((x) => normUrl(x.image_url) === key)) acc.push(cur)
-            return acc
-          }, [])
           // Sort by style rank (model > ghost > flat > other), then score desc
           .sort((a, b) => {
             const r = styleRank(a.image_url) - styleRank(b.image_url)
@@ -287,44 +287,85 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
 
   const selectedItem = useMemo(() => {
     if (selectedImageUrl) return allImages.find((i) => i.image_url === selectedImageUrl) || null
-    // Filter by placement first
-    let matches = allImages.filter((i) => normPlacement(i.placement).key === placement)
-    // Gender hard filter to remove opposite models
-    if (womensSelected) matches = matches.filter((i) => !/(onman\b|\bmen\b)/i.test(i.image_url))
-    if (mensSelected) matches = matches.filter((i) => !/(onwoman|womens|women\b)/i.test(i.image_url))
-    // Color: always enforce selected color (hex or name heuristics). If no matches, return null -> fall back to variant image
-    if (selectedColor) {
-      const byColor = matches.filter((i) => colorMatches(i, selectedColor, selectedColorHex))
-      if (!byColor.length) return null
-      matches = byColor
-    }
-    // Sort and pick top
+    // Use all images for main pick so true per-color PNGs can be selected
+    const matches = [...allImages]
+    // Soft preference for current placement without filtering others
+    const prefersPlacement = (_u: string, p: string) => (normPlacement(p).key === placement ? 0 : 1)
     matches.sort((a, b) => {
+      // Prefer assets that match the selected color (so real per-color mockups swap in)
+      const am = colorMatches(a, selectedColor, selectedColorHex) ? 0 : 1
+      const bm = colorMatches(b, selectedColor, selectedColorHex) ? 0 : 1
+      if (am !== bm) return am - bm
+      // If both match color, prefer transparent PNGs to allow background colorization when needed
+      const ap = isPng(a.image_url) ? 0 : 1
+      const bp = isPng(b.image_url) ? 0 : 1
+      if (am === 0 && bm === 0 && ap !== bp) return ap - bp
+      if (preferMenModels) {
+        const g = genderPrefRank(a.image_url) - genderPrefRank(b.image_url)
+        if (g !== 0) return g
+      }
+      const pr = prefersPlacement(a.image_url, a.placement) - prefersPlacement(b.image_url, b.placement)
+      if (pr !== 0) return pr
       const r = styleRank(a.image_url) - styleRank(b.image_url)
       if (r !== 0) return r
+      const fe = fileExtRank(a.image_url) - fileExtRank(b.image_url)
+      if (fe !== 0) return fe
       return b._score - a._score
     })
     return matches[0] || null
-  }, [allImages, placement, selectedImageUrl, selectedColorHex, selectedColor, womensSelected, mensSelected])
+  }, [allImages, placement, selectedImageUrl, selectedColor, selectedColorHex])
 
-  // Prefer mockup selection; if none (e.g., color strict filter), fall back to variant's colored image, then product image
   const activeImage = selectedItem?.image_url || activeVariant?.image || product.image || placementImage?.image_url || undefined
 
+  // When the active image changes, reset measured dims so container aspect ratio re-computes.
+  // This prevents background letterbox vs image ratio mismatches and flicker artifacts.
+  useEffect(() => {
+    setImgDims(null)
+  }, [activeImage])
+
+  // Resolve background (image/color) for the current placement that best matches the selected color
+  const selectedBg = useMemo(() => {
+    const placeKey = placement
+    // Use the full images pool (not deduped by placement) so we can match color-specific backgrounds
+    const candidates = allImages.filter((it) => normPlacement(it.placement).key === placeKey)
+    const ranked = candidates
+      .map((it) => ({ it, match: colorMatches(it, selectedColor, selectedColorHex) }))
+      .sort((a, b) => {
+        if (a.match !== b.match) return a.match ? -1 : 1
+        const ai = a.it.background_image ? 1 : 0
+        const bi = b.it.background_image ? 1 : 0
+        if (ai !== bi) return bi - ai
+        const ac = a.it.background_color ? 1 : 0
+        const bc = b.it.background_color ? 1 : 0
+        if (ac !== bc) return bc - ac
+        return 0
+      })
+    return ranked[0]?.it || null
+  }, [allImages, placement, selectedColor, selectedColorHex])
+
+  const preferredBgColor = useMemo(() => {
+    return selectedColorHex || normalizeHex(selectedBg?.background_color || null) || normalizeHex(placementImage?.background_color || null)
+  }, [selectedBg?.background_color, placementImage?.background_color, selectedColorHex])
+
+  // Only use a background image if: (1) active asset is a transparent PNG, (2) the selection is heather-like, and (3) the background matches the selected color
+  const bgImageUrl = useMemo(() => {
+    const transparent = isPng(activeImage)
+    if (!transparent) return undefined
+    if (!isHeatherSelected) return undefined
+    const cand = selectedBg && colorMatches(selectedBg, selectedColor, selectedColorHex) ? selectedBg : null
+    const fallback = !cand && placementImage && colorMatches(placementImage, selectedColor, selectedColorHex) ? placementImage : null
+    const chosen = cand || fallback
+    return chosen?.background_image || undefined
+  }, [activeImage, selectedBg, placementImage, selectedColor, selectedColorHex, isHeatherSelected])
+
   const thumbs = useMemo(() => {
-    let arr = allImages
-    // Filter by placement to keep the stack focused
-    arr = arr.filter((it) => normPlacement(it.placement).key === placement)
-    // Gender-based filtering
-    if (womensSelected) arr = arr.filter((it) => !/(onman\b|\bmen\b)/i.test(it.image_url))
-    if (mensSelected) arr = arr.filter((it) => !/(onwoman|womens|women\b)/i.test(it.image_url))
-    // Color filtering (strict): require selected color via hex or name heuristics
-    if (selectedColor) {
-      const withColor = arr.filter((i) => colorMatches(i, selectedColor, selectedColorHex))
-      arr = withColor
-    }
+    let arr = allImages as ScoredImage[]
+    // Keep consistent stack across colors; show only model images if available
+    const models = arr.filter((i) => isModelUrl(i.image_url))
+    arr = models.length ? models : arr
     // Filter invalid src
     arr = arr.filter((it) => !!(it.image_url && it.image_url.trim().length > 0))
-    // Dedupe by image_url
+    // Dedupe by base URL
     const seen = new Set<string>()
     const uniq = arr.filter((it) => {
       const key = normUrl(it.image_url)
@@ -332,14 +373,20 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
       seen.add(key)
       return true
     })
-    // Sort model first, then ghost, then flat, then score
+    // Sort: prefer male models (if requested), then model>ghost>flat, then baked ext, then score
     const sorted = uniq.sort((a, b) => {
+      if (preferMenModels) {
+        const g = genderPrefRank(a.image_url) - genderPrefRank(b.image_url)
+        if (g !== 0) return g
+      }
       const r = styleRank(a.image_url) - styleRank(b.image_url)
       if (r !== 0) return r
+      const fe = fileExtRank(a.image_url) - fileExtRank(b.image_url)
+      if (fe !== 0) return fe
       return b._score - a._score
     })
     return sorted.slice(0, 8)
-  }, [allImages, placement, womensSelected, mensSelected, selectedColorHex, selectedColor])
+  }, [allImages])
 
   const handleGenerate = () => {
     // Placeholder: wire to generation backend later
@@ -374,9 +421,10 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
               const isActive = (selectedItem?.image_url || activeImage) === t.image_url
               return (
                 <button
-                  key={t.image_url}
-                  onClick={() => { setSelectedImageUrl(t.image_url); setPlacement(normPlacement(t.placement).key) }}
-                  className={`relative w-16 h-16 rounded-lg border overflow-hidden ${isActive ? 'border-amber-400/60 shadow-[0_0_0_2px_rgba(251,191,36,0.35)]' : 'border-white/10 hover:border-white/20'} bg-white/[0.03]`}
+                  key={`${normUrl(t.image_url)}|${normPlacement(t.placement).key}`}
+                  onClick={() => { setSelectedImageUrl(t.image_url) }}
+                  className={`relative w-16 h-16 rounded-lg border overflow-hidden ${isActive ? 'border-amber-400/60 shadow-[0_0_0_2px_rgba(251,191,36,0.35)]' : 'border-white/10 hover:border-white/20'}`}
+                  style={{ backgroundColor: isPng(t.image_url) ? (selectedColorHex || t.background_color || 'transparent') : 'transparent' }}
                   title={normPlacement(t.placement).label}
                 >
                   <Image src={t.image_url} alt="thumb" fill sizes="64px" className="object-cover" />
@@ -387,17 +435,30 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
 
           {/* Main image */}
           <div
-            className="relative w-full aspect-square rounded-xl overflow-hidden border border-white/10"
+            className="relative w-full rounded-xl overflow-hidden border border-white/10"
             style={{
-              // Do not tint canvas with garment color; only show an ambient background image if provided
-              backgroundColor: 'rgba(255,255,255,0.06)',
-              backgroundImage: (selectedItem?.background_image || placementImage?.background_image) ? `url(${selectedItem?.background_image || placementImage?.background_image})` : undefined,
-              backgroundSize: (selectedItem?.background_image || placementImage?.background_image) ? 'cover' : undefined,
-              backgroundPosition: (selectedItem?.background_image || placementImage?.background_image) ? 'center' : undefined,
+              aspectRatio: (imgDims?.w && imgDims?.h) ? `${imgDims.w} / ${imgDims.h}` : undefined,
+              // Use selected color for letterbox areas for ALL asset types; for transparent PNGs it will also color the garment
+              backgroundColor: imgDims ? (preferredBgColor || 'transparent') : 'transparent',
+              backgroundImage: bgImageUrl ? `url(${bgImageUrl})` : undefined,
+              backgroundSize: bgImageUrl ? 'cover' : undefined,
+              backgroundPosition: bgImageUrl ? 'center' : undefined,
+              backgroundRepeat: bgImageUrl ? 'no-repeat' : undefined,
             }}
           >
             {activeImage ? (
-              <Image src={activeImage} alt={product.title} fill sizes="(max-width: 1024px) 100vw, 50vw" className="object-contain" />
+              <Image
+                src={activeImage}
+                alt={product.title}
+                fill
+                sizes="(max-width: 1024px) 100vw, 50vw"
+                className="object-contain"
+                onLoadingComplete={(img) => {
+                  const w = (img as HTMLImageElement).naturalWidth || 0
+                  const h = (img as HTMLImageElement).naturalHeight || 0
+                  if (w > 0 && h > 0) setImgDims({ w, h })
+                }}
+              />
             ) : (
               <div className="w-full h-full" />
             )}
@@ -432,9 +493,10 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
               const isActive = (selectedItem?.image_url || activeImage) === t.image_url
               return (
                 <button
-                  key={t.image_url}
-                  onClick={() => { setSelectedImageUrl(t.image_url); setPlacement(normPlacement(t.placement).key) }}
-                  className={`relative flex-none w-16 h-16 rounded-lg border overflow-hidden ${isActive ? 'border-amber-400/60 shadow-[0_0_0_2px_rgba(251,191,36,0.35)]' : 'border-white/10 hover:border-white/20'} bg-white/[0.03]`}
+                  key={`${normUrl(t.image_url)}|${normPlacement(t.placement).key}`}
+                  onClick={() => { setSelectedImageUrl(t.image_url) }}
+                  className={`relative flex-none w-16 h-16 rounded-lg border overflow-hidden ${isActive ? 'border-amber-400/60 shadow-[0_0_0_2px_rgba(251,191,36,0.35)]' : 'border-white/10 hover:border-white/20'}`}
+                  style={{ backgroundColor: isPng(t.image_url) ? (selectedColorHex || t.background_color || 'transparent') : 'transparent' }}
                   title={normPlacement(t.placement).label}
                 >
                   <Image src={t.image_url} alt="thumb" fill sizes="64px" className="object-cover" />

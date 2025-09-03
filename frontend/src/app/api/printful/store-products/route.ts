@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
 
@@ -18,22 +18,37 @@ async function pf(path: string) {
   return res.json()
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const { searchParams } = new URL(req.url)
+    const limit = Math.max(1, Math.min(24, Number(searchParams.get('limit') || '10')))
+
     const list = await pf('/store/products')
     const items: Array<{ id: number; name: string; thumbnail_url: string | null }> = list?.result || []
+    const sliced = items.slice(0, limit)
 
-    // If thumbnail_url is null, try to fetch first variant image from details
+    // Enrich each item with a reliable thumbnail and min price across variants
     const enriched = await Promise.all(
-      items.map(async (p: any) => {
-        if (p.thumbnail_url) return { id: p.id, name: p.name, thumbnail: p.thumbnail_url }
+      sliced.map(async (p: any) => {
         try {
           const detail = await pf(`/store/products/${p.id}`)
-          const firstSync = (detail?.result?.sync_variants || [])[0]
-          const fallback = firstSync?.product?.image || null
-          return { id: p.id, name: p.name, thumbnail: fallback }
+          const syncVariants: any[] = Array.isArray(detail?.result?.sync_variants) ? detail.result.sync_variants : []
+          const firstSync = syncVariants[0]
+          const thumb = p.thumbnail_url || firstSync?.product?.image || null
+
+          let min = Number.POSITIVE_INFINITY
+          const currency: string | null = (detail?.result?.sync_product?.currency as string) || null
+          for (const sv of syncVariants) {
+            const rp = (sv?.retail_price ?? sv?.price ?? sv?.variant_retail_price) as string | number | undefined
+            if (rp != null) {
+              const n = parseFloat(String(rp))
+              if (!Number.isNaN(n) && n < min) min = n
+            }
+          }
+          const min_price = Number.isFinite(min) ? min : null
+          return { id: p.id, name: p.name, thumbnail: thumb, min_price, currency }
         } catch (e) {
-          return { id: p.id, name: p.name, thumbnail: null }
+          return { id: p.id, name: p.name, thumbnail: p.thumbnail_url || null, min_price: null, currency: null }
         }
       })
     )

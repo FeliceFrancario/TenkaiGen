@@ -24,17 +24,17 @@ export async function GET(req: NextRequest) {
     const productId = searchParams.get('product_id')
     if (!productId) return NextResponse.json({ error: 'product_id is required' }, { status: 400 })
 
-    // Try v2 blank images endpoint first
+    // Prefer v2 images endpoint first (includes model/lifestyle photos)
     let result: any
     try {
-      const data = await pf(`/v2/catalog-products/${encodeURIComponent(productId)}/blank-images`)
+      const data = await pf(`/v2/catalog-products/${encodeURIComponent(productId)}/images`)
       result = (data?.data || data?.result || data)
     } catch (e: any) {
       const msg = String(e?.message || '')
-      // If not found, fall back to the (non-blank) images endpoint
+      // If not found, fall back to the blank-images endpoint for transparent mockups
       if (/\b404\b/.test(msg)) {
         try {
-          const alt = await pf(`/v2/catalog-products/${encodeURIComponent(productId)}/images`)
+          const alt = await pf(`/v2/catalog-products/${encodeURIComponent(productId)}/blank-images`)
           result = (alt?.data || alt?.result || alt)
         } catch (e2: any) {
           // v2 also failed, attempt v1 products detail to salvage variant previews
@@ -77,7 +77,15 @@ export async function GET(req: NextRequest) {
     // v2 blank-images returns data[] entries with images[] per entry
     // v2 images may also return a similar nesting or a flat array; handle both
     const items: any[] = []
+    const colorHexByName = new Map<string, string | null>()
+    const colorNames = new Set<string>()
     for (const entry of arr) {
+      const colorName = (entry as any)?.color || null
+      const primaryHex = (entry as any)?.primary_hex_color || null
+      if (colorName) {
+        colorNames.add(String(colorName))
+        if (!colorHexByName.has(String(colorName))) colorHexByName.set(String(colorName), primaryHex || null)
+      }
       const imgs = Array.isArray((entry as any)?.images) ? (entry as any).images : Array.isArray(entry) ? entry : []
       if (imgs.length) {
         for (const im of imgs) {
@@ -93,12 +101,41 @@ export async function GET(req: NextRequest) {
           items.push({
             placement,
             image_url: url,
-            background_color: im.background_color || (entry as any)?.primary_hex_color || null,
+            color_name: colorName || null,
+            background_color: primaryHex || im.background_color || null,
             background_image: im.background_image || null,
           })
         }
       }
     }
+
+    // Also try to append one JPG variant per color using v1 product details (matches by color name)
+    try {
+      const v1 = await pf(`/products/${encodeURIComponent(productId)}`)
+      const v1res = (v1?.result || {}) as any
+      const v1variants: any[] = Array.isArray(v1res.variants) ? v1res.variants : []
+      const norm = (s: string) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+      const seenBase = new Set(items.map((it) => String(it.image_url || '').split('?')[0]))
+      for (const cname of Array.from(colorNames)) {
+        const targ = v1variants.find((v) => {
+          const nm = norm(v?.name || '')
+          return nm.includes(norm(cname)) && (v?.image || v?.files?.[0]?.preview_url)
+        })
+        if (!targ) continue
+        const url = targ.image || targ?.files?.[0]?.preview_url
+        if (!url) continue
+        const base = String(url).split('?')[0]
+        if (seenBase.has(base)) continue
+        seenBase.add(base)
+        items.push({
+          placement: 'front',
+          image_url: url,
+          color_name: cname,
+          background_color: colorHexByName.get(cname) || null,
+          background_image: null,
+        })
+      }
+    } catch {}
 
     return NextResponse.json({ result: items })
   } catch (e: any) {
