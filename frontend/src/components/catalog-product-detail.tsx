@@ -452,7 +452,7 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
                 alt={product.title}
                 fill
                 sizes="(max-width: 1024px) 100vw, 50vw"
-                className="object-contain"
+                className="object-cover"
                 onLoadingComplete={(img) => {
                   const w = (img as HTMLImageElement).naturalWidth || 0
                   const h = (img as HTMLImageElement).naturalHeight || 0
