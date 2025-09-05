@@ -84,10 +84,6 @@ export default async function CatalogLayout({
             )
           })}
         </nav>
-        <div className="mt-6 text-xs text-white/60">
-          Luxury mode
-          <span className="ml-2 inline-block h-2 w-2 rounded-full bg-gradient-to-r from-amber-400 to-rose-400 shadow-[0_0_12px_rgba(251,191,36,0.8)]" />
-        </div>
       </aside>
       <section className="bg-[radial-gradient(ellipse_at_top,rgba(251,191,36,0.08),transparent_60%),radial-gradient(ellipse_at_bottom,rgba(244,63,94,0.06),transparent_60%)]">
         {children}

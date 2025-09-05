@@ -13,7 +13,7 @@ export function Hero() {
   const [attachments, setAttachments] = useState<File[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
-  const { isGenerating, setPrompt: setFlowPrompt, setShortcutMode, setGenerating, setProduct, setStyle, setFranchise, setExpandedPrompt } = useFlow()
+  const { setPrompt: setFlowPrompt, setShortcutMode, setGenerating, setProduct, setStyle, setFranchise, setExpandedPrompt } = useFlow()
 
   // Typewriter headline
   const phrases = [
@@ -98,6 +98,9 @@ export function Hero() {
           if (data.productSlug && data.productName) setProduct(data.productSlug, data.productName)
         } catch (e) {
           console.error('[hero] parse-prompt bg error', e)
+        } finally {
+          // Parsing complete; keep banner visible a bit longer to survive navigation/paint
+          setTimeout(() => setGenerating(false), 3000)
         }
       })()
     } catch (e) {
@@ -191,13 +194,7 @@ export function Hero() {
           </div>
         </div>
 
-        {/* Generating indicator */}
-        {isGenerating && (
-          <div className="mt-3 flex items-center justify-center gap-3 text-sm text-white/80">
-            <span className="inline-block w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-            <span>Creating your design in the background...</span>
-          </div>
-        )}
+        {/* Removed inline generating indicator on homepage to avoid perceived lag; generation runs in background */}
 
         {/* Attachment chips */}
         {attachments.length > 0 && (

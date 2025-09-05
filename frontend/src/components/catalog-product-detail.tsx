@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import { STYLES } from '@/lib/styles'
 import { useFlow } from '@/components/flow-provider'
@@ -30,7 +30,9 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
   const [selectedSize, setSelectedSize] = useState<string | undefined>(undefined)
   const [selectedStyle, setSelectedStyle] = useState<string | undefined>(undefined)
   const [prompt, setPrompt] = useState('')
-  const { isGenerating, setGenerating } = useFlow()
+  const promptRef = useRef<HTMLTextAreaElement | null>(null)
+  const [hasGeneratedOnce, setHasGeneratedOnce] = useState(false)
+  const { isGenerating, setGenerating, setPrompt: setFlowPrompt, setStyle: setFlowStyle, setColor: setFlowColor, setSize: setFlowSize, setPrintArea: setFlowPrintArea, setExpandedPrompt, setFranchise } = useFlow()
 
   // Images from v2 endpoint (placement + background info)
   type PlImage = { placement: string; image_url: string; color_name?: string | null; background_color?: string | null; background_image?: string | null }
@@ -97,6 +99,22 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
     // Fallback to first
     return product.variants[0]
   }, [product, selectedColor, selectedSize])
+
+  // Sync selection state into shared flow for global banner and downstream steps
+  useEffect(() => {
+    setFlowColor(selectedColor)
+  }, [selectedColor, setFlowColor])
+  useEffect(() => {
+    setFlowSize(selectedSize)
+  }, [selectedSize, setFlowSize])
+  useEffect(() => {
+    const key = (placement || '').toLowerCase()
+    const mapped = key.includes('back') ? 'Back' : 'Front' as 'Front' | 'Back'
+    setFlowPrintArea(mapped)
+  }, [placement, setFlowPrintArea])
+  useEffect(() => {
+    if (selectedStyle) setFlowStyle(selectedStyle)
+  }, [selectedStyle, setFlowStyle])
 
   // Normalize placement keys and labels
   const normPlacement = (p: string) => {
@@ -388,19 +406,56 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
     return sorted.slice(0, 8)
   }, [allImages])
 
-  const handleGenerate = () => {
-    // Placeholder: wire to generation backend later
-    // For now, just log the intended payload
-    console.log('[generate]', {
-      product_id: product.id,
-      color: selectedColor,
-      size: selectedSize,
-      style: selectedStyle || 'Standard',
-      prompt: prompt.trim(),
-    })
-    // Temporary UX: simulate generation pending then complete
-    setGenerating(true)
-    setTimeout(() => setGenerating(false), 2000)
+  const handleGenerate = async () => {
+    const rawPrompt = prompt.trim()
+    if (!rawPrompt) return
+    try {
+      setGenerating(true)
+      // Share prompt to global flow so the banner can show a snippet
+      setFlowPrompt(rawPrompt)
+
+      // 1) Parse prompt to enrich/style/franchise
+      const parseRes = await fetch('/api/parse-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: rawPrompt, style: selectedStyle || undefined }),
+      })
+      if (parseRes.ok) {
+        const parsed = await parseRes.json()
+        if (parsed?.expandedPrompt) setExpandedPrompt(parsed.expandedPrompt)
+        if (typeof parsed?.franchise !== 'undefined') setFranchise(parsed.franchise || undefined)
+      }
+
+      // 2) Queue generation job
+      const payload = {
+        productSlug: null as string | null,
+        productName: product.title,
+        variant: activeVariant?.name || null,
+        style: selectedStyle || 'Standard',
+        color: selectedColor || null,
+        size: selectedSize || null,
+        printArea: (placement || '').toLowerCase().includes('back') ? 'Back' : 'Front',
+        prompt: rawPrompt,
+        // expanded/franchise may have been set by parse step; we'll just read from refs next time
+      }
+      const genRes = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (genRes.ok) {
+        const j = await genRes.json()
+        console.log('[generate] queued', j)
+        setHasGeneratedOnce(true)
+      } else {
+        console.warn('[generate] failed to queue')
+      }
+    } catch (e) {
+      console.error('[generate] error', e)
+    } finally {
+      // Since backend is stubbed, end the generating state so user regains controls
+      setGenerating(false)
+    }
   }
 
   return (
@@ -599,12 +654,22 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
           </div>
 
           <div className="mb-4">
-            <div className="text-sm text-white/60 mb-2">Prompt</div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm text-white/60">Prompt</div>
+              {hasGeneratedOnce && (
+                <button
+                  type="button"
+                  onClick={() => promptRef.current?.focus()}
+                  className="text-xs text-amber-300/90 hover:text-amber-200 underline underline-offset-2"
+                >Try a different prompt</button>
+              )}
+            </div>
             <textarea
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={(e) => { setPrompt(e.target.value); setFlowPrompt(e.target.value) }}
               placeholder="e.g., Crimson and gold phoenix in minimalist line art, centered composition"
               rows={6}
+              ref={promptRef}
               className="w-full resize-none bg-transparent outline-none placeholder:text-white/40 text-white"
             />
           </div>
