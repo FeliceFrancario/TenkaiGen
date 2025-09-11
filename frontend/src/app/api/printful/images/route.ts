@@ -22,34 +22,41 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const productId = searchParams.get('product_id')
+    const preferBlank = searchParams.get('blank') === '1'
     if (!productId) return NextResponse.json({ error: 'product_id is required' }, { status: 400 })
 
-    // Prefer v2 images endpoint first (includes model/lifestyle photos)
+    // Optionally prefer v2 blank-images (flat/ghost) when designer needs clean mockups
     let result: any
-    try {
-      const data = await pf(`/v2/catalog-products/${encodeURIComponent(productId)}/images`)
-      result = (data?.data || data?.result || data)
-    } catch (e: any) {
-      const msg = String(e?.message || '')
-      // If not found, fall back to the blank-images endpoint for transparent mockups
-      if (/\b404\b/.test(msg)) {
-        try {
-          const alt = await pf(`/v2/catalog-products/${encodeURIComponent(productId)}/blank-images`)
-          result = (alt?.data || alt?.result || alt)
-        } catch (e2: any) {
+    if (preferBlank) {
+      try {
+        const alt = await pf(`/v2/catalog-products/${encodeURIComponent(productId)}/blank-images`)
+        result = (alt?.data || alt?.result || alt)
+      } catch {}
+    }
+    if (!result) {
+      try {
+        const data = await pf(`/v2/catalog-products/${encodeURIComponent(productId)}/images`)
+        result = (data?.data || data?.result || data)
+      } catch (e: any) {
+        const msg = String(e?.message || '')
+        if (/\b404\b/.test(msg) && !preferBlank) {
+          try {
+            const alt = await pf(`/v2/catalog-products/${encodeURIComponent(productId)}/blank-images`)
+            result = (alt?.data || alt?.result || alt)
+          } catch {}
+        }
+        if (!result) {
           // v2 also failed, attempt v1 products detail to salvage variant previews
           try {
             const v1 = await pf(`/products/${encodeURIComponent(productId)}`)
             const v1res = (v1?.result || {}) as any
             const v1variants: any[] = Array.isArray(v1res.variants) ? v1res.variants : []
-            // Build a result-like structure compatible with downstream flattener
             result = [
               {
                 images: v1variants
                   .map((v: any) => {
                     const url = v?.image || v?.files?.[0]?.preview_url || ''
                     if (!url) return null
-                    // Heuristic: front if url contains front/back markers otherwise default to front
                     const u = String(url).toLowerCase()
                     const placement = /back/.test(u) ? 'back' : 'front'
                     return { placement, image_url: url, background_color: null, background_image: null }
@@ -62,8 +69,6 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ result: [] })
           }
         }
-      } else {
-        throw e
       }
     }
 

@@ -55,6 +55,8 @@ export async function GET(req: NextRequest) {
         color: v.color || v.color_name || null,
         color_code: v.color_code || v.color_hex || null,
         image: v.image || v.files?.[0]?.preview_url || null,
+        price: v.price ?? v.retail_price ?? null,
+        currency: (result as any)?.currency || null,
       })),
       image: product.image || null,
     }

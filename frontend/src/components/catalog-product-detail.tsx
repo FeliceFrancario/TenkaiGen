@@ -1,9 +1,10 @@
 'use client'
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
 import { STYLES } from '@/lib/styles'
 import { useFlow } from '@/components/flow-provider'
+import { useRouter } from 'next/navigation'
 
 export type CatalogProduct = {
   id: number
@@ -29,10 +30,8 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
   const [selectedColor, setSelectedColor] = useState<string | undefined>(undefined)
   const [selectedSize, setSelectedSize] = useState<string | undefined>(undefined)
   const [selectedStyle, setSelectedStyle] = useState<string | undefined>(undefined)
-  const [prompt, setPrompt] = useState('')
-  const promptRef = useRef<HTMLTextAreaElement | null>(null)
-  const [hasGeneratedOnce, setHasGeneratedOnce] = useState(false)
-  const { isGenerating, setGenerating, setPrompt: setFlowPrompt, setStyle: setFlowStyle, setColor: setFlowColor, setSize: setFlowSize, setPrintArea: setFlowPrintArea, setExpandedPrompt, setFranchise } = useFlow()
+  const router = useRouter()
+  const { isGenerating, setStyle: setFlowStyle, setColor: setFlowColor, setSize: setFlowSize, setPrintArea: setFlowPrintArea } = useFlow()
 
   // Images from v2 endpoint (placement + background info)
   type PlImage = { placement: string; image_url: string; color_name?: string | null; background_color?: string | null; background_image?: string | null }
@@ -42,6 +41,16 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
   const [allImages, setAllImages] = useState<ScoredImage[]>([])
   const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null)
   const [imgDims, setImgDims] = useState<{ w: number; h: number } | null>(null)
+
+  // Pricing + shipping
+  const [geoCountry, setGeoCountry] = useState<string>('US')
+  const [priceLabel, setPriceLabel] = useState<string>('—')
+  const [priceCurrency, setPriceCurrency] = useState<string>('')
+  const [shipLabel, setShipLabel] = useState<string>('—')
+  const [shipEta, setShipEta] = useState<string>('')
+  const [shipCurrency, setShipCurrency] = useState<string>('')
+  const [shippingAvailable, setShippingAvailable] = useState<boolean>(true)
+  const [regionCode, setRegionCode] = useState<string>('')
 
   // Local size sorting since util was removed
   const sortSizesLocal = (arr: string[]) => {
@@ -115,6 +124,146 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
   useEffect(() => {
     if (selectedStyle) setFlowStyle(selectedStyle)
   }, [selectedStyle, setFlowStyle])
+
+  // Detect user country (edge header) for shipping estimation
+  useEffect(() => {
+    let mounted = true
+    fetch('/api/geo').then(r => r.json()).then(j => {
+      if (!mounted) return
+      if (j?.countryCode) setGeoCountry(String(j.countryCode))
+      if (j?.regionCode) setRegionCode(String(j.regionCode))
+    }).catch(() => {})
+    // Client-side locale fallback (e.g., it-IT -> IT) if edge header is missing or defaults to US
+    try {
+      const lang = (typeof navigator !== 'undefined' && navigator.language) ? navigator.language : ''
+      const m = /-([A-Z]{2})$/i.exec(lang)
+      if (m && m[1]) {
+        const cc = m[1].toUpperCase()
+        setGeoCountry((prev) => (prev === 'US' ? cc : prev))
+      }
+    } catch {}
+    return () => { mounted = false }
+  }, [])
+
+  // Fetch prices for catalog product
+  useEffect(() => {
+    let mounted = true
+    const catalogId = (product as any).catalog_product_id || product.id
+    if (!catalogId) return
+    ;(async () => {
+      try {
+        // Infer a currency from country
+        const cc = String(geoCountry || 'US').toUpperCase()
+        const eurCountries = new Set(['IT','FR','DE','ES','NL','BE','PT','IE','FI','AT','GR','EE','LV','LT','LU','MT','SI','SK','CY'])
+        const desiredCurrency = cc === 'GB' || cc === 'UK' ? 'GBP' : eurCountries.has(cc) ? 'EUR' : 'USD'
+        const sellingRegion = eurCountries.has(cc) || cc === 'GB' || cc === 'UK' ? 'eu' : 'us'
+        const res = await fetch(`/api/printful/prices?product_id=${catalogId}&currency=${desiredCurrency}&selling_region=${sellingRegion}`)
+        if (!res.ok) return
+        const data = await res.json()
+        const payload = data?.result || {}
+        // Heuristics: find a minimal base price. v2 returns array or object; try common shapes
+        let amount: number | null = null
+        let resultCurrency = ''
+        const tryNum = (v: any) => {
+          const n = Number(v)
+          return Number.isFinite(n) ? n : null
+        }
+        if (Array.isArray(payload)) {
+          for (const item of payload) {
+            const a = tryNum(item?.price?.amount ?? item?.min_price?.amount ?? item?.base_price?.amount)
+            const cur = item?.price?.currency || item?.min_price?.currency || item?.base_price?.currency || ''
+            if (a != null && (amount == null || a < amount)) { amount = a; resultCurrency = cur }
+          }
+        } else if (payload) {
+          const a = tryNum(payload?.price?.amount ?? payload?.min_price?.amount ?? payload?.base_price?.amount)
+          const cur = payload?.price?.currency || payload?.min_price?.currency || payload?.base_price?.currency || ''
+          if (a != null) { amount = a; resultCurrency = cur }
+        }
+        if (amount != null) {
+          setPriceLabel(amount.toFixed(2))
+          setPriceCurrency(resultCurrency || desiredCurrency)
+        } else {
+          // Fallback: compute min from product variants if present
+          const variants: any[] = Array.isArray((product as any)?.variants) ? (product as any).variants : []
+          let min = Infinity
+          for (const v of variants) {
+            const p = Number(v?.price)
+            if (Number.isFinite(p)) min = Math.min(min, p)
+          }
+          if (min !== Infinity) {
+            setPriceLabel(min.toFixed(2))
+            setPriceCurrency((variants[0]?.currency as string) || desiredCurrency)
+          }
+        }
+      } catch {}
+    })()
+    return () => { mounted = false }
+  }, [product.id, geoCountry])
+
+  // Fetch shipping availability and estimate for the selected variant and country
+  useEffect(() => {
+    let mounted = true
+    const catalogId = (product as any).catalog_product_id || product.id
+    if (!catalogId || !activeVariant?.id || !geoCountry) return
+    ;(async () => {
+      try {
+        // Check if product ships to country
+        const sc = await fetch(`/api/printful/shipping-countries?product_id=${catalogId}`)
+        if (sc.ok) {
+          const j = await sc.json()
+          const list: any[] = j?.result || []
+          const ok = list.some((c: any) => String(c?.code || c?.country_code || '').toUpperCase() === String(geoCountry).toUpperCase())
+          setShippingAvailable(ok)
+          if (!ok) { setShipLabel('Unavailable'); setShipEta(''); return }
+        }
+        // Find a matching variant and use v1 variant_id for shipping rates (v1 endpoint)
+        let variantId = activeVariant.id
+        try {
+          const vres = await fetch(`/api/printful/variants?product_id=${catalogId}`)
+          if (vres.ok) {
+            const vj = await vres.json()
+            const arr: any[] = vj?.result || []
+            const found = arr.find((v: any) => String(v.size||'')===String(selectedSize||'') && String(v.color||'')===String(selectedColor||''))
+            if (found?.variant_id) variantId = found.variant_id
+          }
+        } catch {}
+        const body: any = { country_code: geoCountry, variant_id: variantId }
+        if ((geoCountry === 'US' || geoCountry === 'CA') && regionCode) body.state_code = regionCode
+        const sr = await fetch('/api/printful/shipping-rates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (sr.ok) {
+          const j = await sr.json()
+          const list: any[] = (j?.result?.rates || j?.result || []) as any[]
+          // pick the cheapest rate
+          let best: any = null
+          for (const r of list) {
+            const amt = Number(r?.rate ?? r?.amount ?? r?.price?.amount)
+            if (!Number.isFinite(amt)) continue
+            if (!best || amt < Number(best._amt)) best = { ...r, _amt: amt }
+          }
+          if (best) {
+            setShipLabel(String(best._amt.toFixed(2)))
+            setShipCurrency(best?.currency || best?.price?.currency || '')
+            const eta = best?.min_delivery_days && best?.max_delivery_days
+              ? `${best.min_delivery_days}–${best.max_delivery_days} days`
+              : (best?.delivery_estimate || '')
+            setShipEta(eta || '')
+          } else {
+            // No rates returned (e.g., missing state); show placeholder
+            setShipLabel('—')
+            setShipCurrency('')
+            setShipEta('')
+          }
+        }
+      } catch {
+        setShippingAvailable(false)
+      }
+    })()
+    return () => { mounted = false }
+  }, [product.id, activeVariant?.id, selectedColor, selectedSize, geoCountry])
 
   // Normalize placement keys and labels
   const normPlacement = (p: string) => {
@@ -406,56 +555,13 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
     return sorted.slice(0, 8)
   }, [allImages])
 
-  const handleGenerate = async () => {
-    const rawPrompt = prompt.trim()
-    if (!rawPrompt) return
-    try {
-      setGenerating(true)
-      // Share prompt to global flow so the banner can show a snippet
-      setFlowPrompt(rawPrompt)
-
-      // 1) Parse prompt to enrich/style/franchise
-      const parseRes = await fetch('/api/parse-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: rawPrompt, style: selectedStyle || undefined }),
-      })
-      if (parseRes.ok) {
-        const parsed = await parseRes.json()
-        if (parsed?.expandedPrompt) setExpandedPrompt(parsed.expandedPrompt)
-        if (typeof parsed?.franchise !== 'undefined') setFranchise(parsed.franchise || undefined)
-      }
-
-      // 2) Queue generation job
-      const payload = {
-        productSlug: null as string | null,
-        productName: product.title,
-        variant: activeVariant?.name || null,
-        style: selectedStyle || 'Standard',
-        color: selectedColor || null,
-        size: selectedSize || null,
-        printArea: (placement || '').toLowerCase().includes('back') ? 'Back' : 'Front',
-        prompt: rawPrompt,
-        // expanded/franchise may have been set by parse step; we'll just read from refs next time
-      }
-      const genRes = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (genRes.ok) {
-        const j = await genRes.json()
-        console.log('[generate] queued', j)
-        setHasGeneratedOnce(true)
-      } else {
-        console.warn('[generate] failed to queue')
-      }
-    } catch (e) {
-      console.error('[generate] error', e)
-    } finally {
-      // Since backend is stubbed, end the generating state so user regains controls
-      setGenerating(false)
-    }
+  const onStartDesigning = () => {
+    const catalogId = (product as any).catalog_product_id || product.id
+    const q = new URLSearchParams()
+    if (selectedColor) q.set('color', selectedColor)
+    if (selectedSize) q.set('size', selectedSize)
+    if (placement) q.set('placement', placement)
+    router.push(`/designer/${catalogId}?${q.toString()}`)
   }
 
   return (
@@ -636,66 +742,41 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
         )}
       </div>
 
-      {/* Right: style + prompt */}
+      {/* Right: pricing + shipping + CTA */}
       <div>
-        {!isGenerating ? (
         <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
-          <div className="mb-4">
-            <div className="text-sm text-white/60 mb-2">Style</div>
-            <div className="flex flex-wrap gap-2">
-              {STYLES.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setSelectedStyle(s)}
-                  className={`px-3 py-1.5 rounded-lg border text-sm ${selectedStyle===s ? 'border-amber-400/40 bg-white/[0.08]' : 'border-white/10 hover:border-white/20 bg-white/[0.04]'}`}
-                >{s}</button>
-              ))}
+          <div className="grid grid-cols-1 gap-4">
+            <div className="rounded-xl bg-white/[0.03] border border-white/10 p-4">
+              <div className="text-xs text-white/60 mb-1">Price</div>
+              <div className="text-2xl font-semibold">
+                {priceLabel !== '—' ? (<><span>{priceCurrency}</span> <span>{priceLabel}</span></>) : '—'}
+              </div>
+              <div className="text-xs text-white/50 mt-1">Base price incl. first placement where applicable</div>
             </div>
-          </div>
 
-          <div className="mb-4">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-sm text-white/60">Prompt</div>
-              {hasGeneratedOnce && (
-                <button
-                  type="button"
-                  onClick={() => promptRef.current?.focus()}
-                  className="text-xs text-amber-300/90 hover:text-amber-200 underline underline-offset-2"
-                >Try a different prompt</button>
-              )}
+            <div className="rounded-xl bg-white/[0.03] border border-white/10 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-white/60 mb-1">Estimated delivery to</div>
+                  <div className="text-sm text-white/80">{geoCountry}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-base font-medium">{shippingAvailable ? (<>{shipCurrency} {shipLabel}</>) : 'Unavailable'}</div>
+                  <div className="text-xs text-white/60">{shipEta || (shippingAvailable ? 'Shipping estimate' : 'Not shippable')}</div>
+                </div>
+              </div>
             </div>
-            <textarea
-              value={prompt}
-              onChange={(e) => { setPrompt(e.target.value); setFlowPrompt(e.target.value) }}
-              placeholder="e.g., Crimson and gold phoenix in minimalist line art, centered composition"
-              rows={6}
-              ref={promptRef}
-              className="w-full resize-none bg-transparent outline-none placeholder:text-white/40 text-white"
-            />
-          </div>
 
-          <div className="flex gap-3">
             <button
-              onClick={handleGenerate}
-              disabled={!prompt.trim()}
-              className="rounded-lg px-5 py-2.5 bg-gradient-to-r from-amber-400 to-rose-500 text-black font-medium disabled:opacity-40 disabled:cursor-not-allowed btn-shimmer"
-            >
-              Generate
-            </button>
-            <div className="text-xs text-white/50 self-center">
-              Color: <span className="text-white/80">{selectedColor || '-'}</span> • Size: <span className="text-white/80">{selectedSize || '-'}</span>
+              onClick={onStartDesigning}
+              className="w-full rounded-lg px-5 py-3 bg-gradient-to-r from-amber-400 to-rose-500 text-black font-medium btn-shimmer"
+            >Start designing</button>
+
+            <div className="text-xs text-white/50">
+              Color: <span className="text-white/80">{selectedColor || '-'}</span> • Size: <span className="text-white/80">{selectedSize || '-'}</span> • Placement: <span className="text-white/80">{placement}</span>
             </div>
           </div>
         </div>
-        ) : (
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 animate-pulse">
-            <div className="h-4 w-24 bg-white/10 rounded mb-4" />
-            <div className="h-8 w-full bg-white/10 rounded mb-3" />
-            <div className="h-8 w-full bg-white/10 rounded mb-3" />
-            <div className="h-24 w-full bg-white/10 rounded" />
-            <div className="mt-4 text-sm text-white/70">Generating your design… Inputs will return shortly.</div>
-          </div>
-        )}
       </div>
     </div>
   )
