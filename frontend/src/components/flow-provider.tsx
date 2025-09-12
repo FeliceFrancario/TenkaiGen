@@ -26,6 +26,29 @@ export type FlowContextValue = {
   setSize: (s: string | undefined) => void
   setShortcutMode: (on: boolean) => void
   setGenerating: (on: boolean) => void
+  // Design selection and transform within print area (normalized units 0..1)
+  designUrl?: string
+  setDesignUrl: (url: string | undefined) => void
+  designTransform?: {
+    placement: 'front' | 'back' | 'left' | 'right'
+    x: number // left within print area (0..1)
+    y: number // top within print area (0..1)
+    w: number // width relative to print area (0..1)
+    h: number // height relative to print area (0..1)
+    rotationDeg: number // degrees
+  }
+  setDesignTransform: (
+    t:
+      | {
+          placement: 'front' | 'back' | 'left' | 'right'
+          x: number
+          y: number
+          w: number
+          h: number
+          rotationDeg: number
+        }
+      | undefined
+  ) => void
   reset: () => void
 }
 
@@ -44,6 +67,18 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const [size, setSizeState] = useState<string | undefined>()
   const [shortcutMode, setShortcutMode] = useState(false)
   const [isGenerating, setGenerating] = useState(false)
+  const [designUrl, setDesignUrlState] = useState<string | undefined>()
+  const [designTransform, setDesignTransformState] = useState<
+    | {
+        placement: 'front' | 'back' | 'left' | 'right'
+        x: number
+        y: number
+        w: number
+        h: number
+        rotationDeg: number
+      }
+    | undefined
+  >()
 
   const setProduct = (slug: string, name: string) => {
     setProductSlug(slug)
@@ -70,11 +105,13 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     setSizeState(undefined)
     setShortcutMode(false)
     setGenerating(false)
+    setDesignUrlState(undefined)
+    setDesignTransformState(undefined)
   }
 
   const value = useMemo(
-    () => ({ productSlug, productName, variant, style, prompt, franchise, expandedPrompt, shortcutMode, isGenerating, setProduct, setVariant, setStyle, setPrompt, setFranchise, setExpandedPrompt, color, setColor, printArea, setPrintArea, size, setSize, setShortcutMode, setGenerating, reset }),
-    [productSlug, productName, variant, style, prompt, franchise, expandedPrompt, color, printArea, size, shortcutMode, isGenerating]
+    () => ({ productSlug, productName, variant, style, prompt, franchise, expandedPrompt, shortcutMode, isGenerating, setProduct, setVariant, setStyle, setPrompt, setFranchise, setExpandedPrompt, color, setColor, printArea, setPrintArea, size, setSize, setShortcutMode, setGenerating, designUrl, setDesignUrl: setDesignUrlState, designTransform, setDesignTransform: setDesignTransformState, reset }),
+    [productSlug, productName, variant, style, prompt, franchise, expandedPrompt, color, printArea, size, shortcutMode, isGenerating, designUrl, designTransform]
   )
 
   return <FlowContext.Provider value={value}>{children}</FlowContext.Provider>

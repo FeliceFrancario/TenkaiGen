@@ -9,7 +9,7 @@ async function pf(path: string) {
   if (!token) throw new Error('Missing PRINTFUL_API_TOKEN')
   const res = await fetch(`${PRINTFUL_API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-store',
+    next: { revalidate: 1800 }, // Cache for 30 minutes
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')

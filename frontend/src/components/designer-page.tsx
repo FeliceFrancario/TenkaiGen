@@ -7,7 +7,7 @@ import { useFlow } from '@/components/flow-provider'
 import { STYLES } from '@/lib/styles'
 import { Sparkles, Upload, Type as TypeIcon, ArrowLeft } from 'lucide-react'
 
-const PRINTFUL_LOGO = 'https://printful.com/static/images/layout/logo-printful.png'
+// Removed Printful logo constant
 
 type DesignerPageProps = {
   productId: number
@@ -34,7 +34,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   const [color] = useState<string | undefined>(fromParams('color'))
   const [size] = useState<string | undefined>(fromParams('size'))
 
-  const { isGenerating, setGenerating, setStyle: setFlowStyle, setPrompt: setFlowPrompt, setPrintArea } = useFlow()
+  const { isGenerating, setGenerating, setStyle: setFlowStyle, setPrompt: setFlowPrompt, setPrintArea, setDesignUrl: setFlowDesignUrl, setDesignTransform } = useFlow()
 
   // Mockup templates (print areas)
   const [templates, setTemplates] = useState<TemplatePlacement[]>([])
@@ -56,6 +56,30 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
 
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const designRef = useRef<HTMLDivElement | null>(null)
+
+  // Fallback print area if mockup-templates are unavailable
+  const getTemplate = (place: string): TemplatePlacement | undefined => {
+    const found = templates.find((t) => t.placement === place)
+    if (found && found.width > 0 && found.height > 0) return found
+    const cw = canvasRef.current?.clientWidth || 900
+    const p = (place || 'front').toLowerCase()
+    if (p.includes('left') || p.includes('right')) {
+      // Sleeves: narrow, tall area toward sides
+      const areaW = Math.round(cw * 0.18)
+      const areaH = Math.round(cw * 0.45)
+      const y = Math.round(cw * 0.24)
+      const x = p.includes('left')
+        ? Math.round(cw * 0.18)
+        : Math.round(cw - areaW - cw * 0.18)
+      return { placement: place, width: areaW, height: areaH, x, y, view_image: null }
+    }
+    // Front/back: centered, smaller than before
+    const areaW = Math.round(cw * 0.42)
+    const areaH = Math.round(cw * 0.52)
+    const x = Math.round((cw - areaW) / 2)
+    const y = Math.round(cw * 0.20)
+    return { placement: place, width: areaW, height: areaH, x, y, view_image: null }
+  }
 
   const refreshDesigns = async () => {
     try {
@@ -146,7 +170,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
 
   // Fit the design inside the print area by default
   useEffect(() => {
-    const tpl = templates.find((t) => t.placement === placement)
+    const tpl = getTemplate(placement)
     if (!tpl) return
     // Assume canvas is 800px max area; scale proportionally
     const maxW = 800
@@ -155,11 +179,30 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     const areaH = tpl.height * scale
     const x = tpl.x * scale
     const y = tpl.y * scale
-    const pad = 8
+    const pad = 4
     const w = Math.max(40, areaW - pad * 2)
     const h = Math.max(40, areaH - pad * 2)
     setDesignRect({ x: x + pad, y: y + pad, w, h, r: 0 })
   }, [templates, placement])
+
+  // Sync selected design URL to global flow
+  useEffect(() => {
+    setFlowDesignUrl(designUrl || undefined)
+  }, [designUrl, setFlowDesignUrl])
+
+  // Sync normalized transform (0..1) relative to print area
+  useEffect(() => {
+    const tpl = getTemplate(placement)
+    if (!tpl || !designUrl) { setDesignTransform(undefined); return }
+    const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
+    const nx = clamp01((designRect.x - tpl.x) / (tpl.width || 1))
+    const ny = clamp01((designRect.y - tpl.y) / (tpl.height || 1))
+    const nw = clamp01(designRect.w / (tpl.width || 1))
+    const nh = clamp01(designRect.h / (tpl.height || 1))
+    const rot = ((designRect.r % 360) + 360) % 360
+    const p: 'front' | 'back' | 'left' | 'right' = (placement as any)
+    setDesignTransform({ placement: p, x: nx, y: ny, w: nw, h: nh, rotationDeg: rot })
+  }, [designRect, placement, designUrl, setDesignTransform])
 
   // Tokenized color matching (denim/indigo/heather etc.)
   const normalizeColor = (s?: string | null) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
@@ -211,7 +254,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       const dx = ev.clientX - startX
       const dy = ev.clientY - startY
       setDesignRect((r) => {
-        const tpl = templates.find((t) => t.placement === placement)
+        const tpl = getTemplate(placement)
         if (!tpl) return { ...r, x: start.x + dx, y: start.y + dy }
         const nx = start.x + dx
         const ny = start.y + dy
@@ -237,7 +280,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     setDesignRect((r) => {
       const nw = Math.max(24, r.w * factor)
       const nh = Math.max(24, r.h * factor)
-      const tpl = templates.find((t) => t.placement === placement)
+      const tpl = getTemplate(placement)
       if (!tpl) return { ...r, w: nw, h: nh }
       // clamp if outside area after resize
       const maxW = tpl.width - 4
@@ -261,7 +304,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   }
 
   const onFitArea = () => {
-    const tpl = templates.find((t) => t.placement === placement)
+    const tpl = getTemplate(placement)
     if (!tpl) return
     const pad = 8
     const w = Math.max(40, tpl.width - pad * 2)
@@ -324,6 +367,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       <div className="mb-3">
         <button
           onClick={() => {
+            // Use replace to avoid back button issues
             router.replace(`/catalog/product/${productId}`)
           }}
           className="inline-flex items-center gap-2 text-white/80 hover:text-white"
@@ -371,7 +415,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                   <div className="text-sm text-white/60 mb-2">Your designs</div>
                   <div className="grid grid-cols-3 gap-2">
                     {designs.map((u) => (
-                      <button key={u} onClick={() => setDesignUrl(u)} className="relative aspect-square rounded-md overflow-hidden border border-white/10 hover:border-amber-400/40">
+                      <button key={u} onClick={() => { setDesignUrl(u); onFitArea() }} className="relative aspect-square rounded-md overflow-hidden border border-white/10 hover:border-amber-400/40">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={u} alt="design" className="w-full h-full object-cover" />
                       </button>
@@ -426,11 +470,13 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
               {activeMockup ? (
                 <Image src={activeMockup} alt="mockup" width={900} height={900} className="w-full h-auto object-contain opacity-90 saturate-[0.85]" />
               ) : (
-                <div className="w-full h-[480px] bg-white/[0.04] border border-white/10 rounded-xl animate-pulse" />
+                <div className="w-full h-[480px] bg-white/[0.04] border border-white/10 rounded-xl animate-pulse flex items-center justify-center">
+                  <div className="text-white/40 text-sm">Loading mockup...</div>
+                </div>
               )}
               {/* Print area dashed overlay */}
-              {(() => { const tpl = templates.find(t => t.placement === placement); return tpl ? (
-                <div style={{ position:'absolute', left: tpl.x, top: tpl.y, width: tpl.width, height: tpl.height }} className={`pointer-events-none ${isMoving ? 'border-2 border-dashed border-amber-300/70' : 'border border-dashed border-white/20'}`} />
+              {(() => { const tpl = getTemplate(placement); return tpl ? (
+                <div style={{ position:'absolute', left: tpl.x, top: tpl.y, width: tpl.width, height: tpl.height }} className={`pointer-events-none ${isMoving ? 'border-2 border-dashed border-amber-300/70' : 'border border-dashed border-white/40'}`} />
               ) : null })()}
               {/* Optional: visualize print area as invisible bounds; keep it subtle */}
               {/* Design rect *inside* the canvas */}
@@ -439,10 +485,11 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                 onMouseDown={onDrag}
                 onWheel={onWheel}
                 style={{ position: 'absolute', left: designRect.x, top: designRect.y, width: designRect.w, height: designRect.h, transform: `rotate(${designRect.r}deg)` }}
-                className="group border-2 border-amber-400/60 bg-white rounded-md shadow-[0_10px_30px_rgba(212,175,55,0.25)] cursor-move"
+                className="group border-2 border-amber-400/60 rounded-md shadow-[0_10px_30px_rgba(212,175,55,0.25)] cursor-move"
               >
                 {designUrl ? (
-                  <Image src={designUrl} alt="design" fill sizes="400px" className="object-contain" />
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={designUrl} alt="design" className="w-full h-full object-contain" />
                 ) : (
                   <div className="w-full h-full grid place-items-center text-xs text-white/50">Pick a design</div>
                 )}

@@ -561,6 +561,8 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
     if (selectedColor) q.set('color', selectedColor)
     if (selectedSize) q.set('size', selectedSize)
     if (placement) q.set('placement', placement)
+    // Add color hex for designer background
+    if (selectedColorHex) q.set('color_hex', selectedColorHex)
     router.push(`/designer/${catalogId}?${q.toString()}`)
   }
 
