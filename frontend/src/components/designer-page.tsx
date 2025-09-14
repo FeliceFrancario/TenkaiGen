@@ -34,9 +34,9 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   const [color] = useState<string | undefined>(fromParams('color'))
   const [size] = useState<string | undefined>(fromParams('size'))
 
-  const { isGenerating, setGenerating, setStyle: setFlowStyle, setPrompt: setFlowPrompt, setPrintArea, setDesignUrl: setFlowDesignUrl, setDesignTransform } = useFlow()
+  const { isGenerating, setGenerating, setStyle: setFlowStyle, setPrompt: setFlowPrompt, setPrintArea, setDesignUrl: setFlowDesignUrl, setDesignTransform, designsByPlacement, setDesignForPlacement } = useFlow()
 
-  // Mockup templates (print areas)
+  // Mockup templates (print areas) - legacy (catalog blank-images); kept as fallback imagery
   const [templates, setTemplates] = useState<TemplatePlacement[]>([])
   const [activeMockup, setActiveMockup] = useState<string | null>(null)
 
@@ -44,6 +44,19 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   type PlImage = { placement: string; image_url: string; color_name?: string | null; background_color?: string | null }
   const [images, setImages] = useState<PlImage[]>([])
   const [canvasBg, setCanvasBg] = useState<string | null>(null)
+
+  // Layout template (Printful Mockup Generator templates)
+  const [variantId, setVariantId] = useState<number | null>(null)
+  const [layoutTemplate, setLayoutTemplate] = useState<{
+    placement: string
+    templateW: number
+    templateH: number
+    areaX: number
+    areaY: number
+    areaW: number
+    areaH: number
+    imageUrl?: string | null
+  } | null>(null)
 
   // Design state (single image for now)
   const [designUrl, setDesignUrl] = useState<string>('')
@@ -59,6 +72,19 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
 
   // Fallback print area if mockup-templates are unavailable
   const getTemplate = (place: string): TemplatePlacement | undefined => {
+    // Prefer exact layout template when available
+    if (layoutTemplate && layoutTemplate.placement === place) {
+      const cw = canvasRef.current?.clientWidth || layoutTemplate.templateW || 900
+      const scale = (layoutTemplate.templateW || cw) > 0 ? cw / (layoutTemplate.templateW || cw) : 1
+      return {
+        placement: place,
+        width: Math.round(layoutTemplate.areaW * scale),
+        height: Math.round(layoutTemplate.areaH * scale),
+        x: Math.round(layoutTemplate.areaX * scale),
+        y: Math.round(layoutTemplate.areaY * scale),
+        view_image: layoutTemplate.imageUrl || null,
+      }
+    }
     const found = templates.find((t) => t.placement === place)
     if (found && found.width > 0 && found.height > 0) return found
     const cw = canvasRef.current?.clientWidth || 900
@@ -68,12 +94,10 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       const areaW = Math.round(cw * 0.18)
       const areaH = Math.round(cw * 0.45)
       const y = Math.round(cw * 0.24)
-      const x = p.includes('left')
-        ? Math.round(cw * 0.18)
-        : Math.round(cw - areaW - cw * 0.18)
+      const x = p.includes('left') ? Math.round(cw * 0.18) : Math.round(cw - areaW - cw * 0.18)
       return { placement: place, width: areaW, height: areaH, x, y, view_image: null }
     }
-    // Front/back: centered, smaller than before
+    // Front/back: centered
     const areaW = Math.round(cw * 0.42)
     const areaH = Math.round(cw * 0.52)
     const x = Math.round((cw - areaW) / 2)
@@ -91,7 +115,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     } catch {}
   }
 
-  // Load mockup templates for the product
+  // Load legacy mockup templates for the product (fallback imagery only)
   useEffect(() => {
     let mounted = true
     ;(async () => {
@@ -118,7 +142,6 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
         setTemplates(tpls)
         const first = tpls.find((t) => t.placement === placement) || tpls[0]
         if (first) setPlacement(first.placement)
-        // keep activeMockup from real images once fetched
       } catch {}
     })()
     return () => { mounted = false }
@@ -129,7 +152,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     try { router.prefetch(`/catalog/product/${productId}`) } catch {}
   }, [router, productId])
 
-  // Load real garment images
+  // Load real garment images (fallback imagery only)
   useEffect(() => {
     let mounted = true
     ;(async () => {
@@ -151,6 +174,70 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     })()
     return () => { mounted = false }
   }, [productId])
+
+  // Load layout templates + printfiles and resolve exact print area per variant + placement
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        // 1) Resolve v1 variant_id by color+size
+        let v1variant: number | null = null
+        try {
+          const vres = await fetch(`/api/printful/variants?product_id=${productId}`)
+          if (vres.ok) {
+            const vj = await vres.json()
+            const list: any[] = vj?.result || []
+            const match = list.find((v: any) => String(v.size||'')===String(size||'') && String(v.color||'')===String(color||''))
+            v1variant = match?.variant_id ?? null
+          }
+        } catch {}
+        if (!mounted) return
+        setVariantId(v1variant)
+
+        // 2) Fetch layout templates
+        const tres = await fetch(`/api/printful/templates?product_id=${productId}`)
+        if (!tres.ok) return
+        const tjson = await tres.json()
+        const tplResult = tjson?.result || {}
+        const templatesArr: any[] = Array.isArray(tplResult?.templates) ? tplResult.templates : []
+        const mappingArr: any[] = Array.isArray(tplResult?.variant_mapping) ? tplResult.variant_mapping : []
+
+        // Determine template_id for our variant+placement
+        let templateId: number | null = null
+        if (v1variant) {
+          const vm = mappingArr.find((m: any) => Number(m?.variant_id) === Number(v1variant))
+          const tForPlacement = Array.isArray(vm?.templates) ? vm.templates.find((t: any) => String(t?.placement||'').toLowerCase().includes(placement)) : null
+          templateId = Number(tForPlacement?.template_id) || null
+        }
+        // Fallback: pick any template matching placement
+        if (!templateId) {
+          const anyT = templatesArr.find((t: any) => String(t?.placement||'').toLowerCase().includes(placement))
+          templateId = Number(anyT?.template_id) || null
+        }
+        if (!templateId) return
+        const selected = templatesArr.find((t: any) => Number(t?.template_id) === templateId)
+        if (!selected) return
+
+        const lt = {
+          placement,
+          templateW: Number(selected?.template_width || 0),
+          templateH: Number(selected?.template_height || 0),
+          areaX: Number(selected?.print_area_left || 0),
+          areaY: Number(selected?.print_area_top || 0),
+          areaW: Number(selected?.print_area_width || 0),
+          areaH: Number(selected?.print_area_height || 0),
+          imageUrl: selected?.image_url || null,
+        }
+        if (!mounted) return
+        setLayoutTemplate(lt)
+        // Use template image for consistent base
+        if (lt.imageUrl) setActiveMockup(lt.imageUrl)
+        // Avoid coloring canvas when using template image
+        setCanvasBg(null)
+      } catch {}
+    })()
+    return () => { mounted = false }
+  }, [productId, color, size, placement])
 
   // Load user B2 designs list (S3-compatible)
   useEffect(() => {
@@ -183,12 +270,22 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     const w = Math.max(40, areaW - pad * 2)
     const h = Math.max(40, areaH - pad * 2)
     setDesignRect({ x: x + pad, y: y + pad, w, h, r: 0 })
-  }, [templates, placement])
+  }, [templates, placement, layoutTemplate])
 
-  // Sync selected design URL to global flow
+  // Initial clear when the designer mounts so no design is preselected
   useEffect(() => {
-    setFlowDesignUrl(designUrl || undefined)
-  }, [designUrl, setFlowDesignUrl])
+    setDesignUrl('')
+  }, [])
+
+  // When placement changes, restore any previously selected design for that placement; otherwise clear and refit
+  useEffect(() => {
+    const key = (placement || 'front') as 'front'|'back'|'left'|'right'
+    const saved = designsByPlacement[key]
+    if (saved?.url) setDesignUrl(saved.url)
+    else { setDesignUrl(''); onFitArea() }
+    // Intentionally do NOT depend on designsByPlacement to avoid update loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placement])
 
   // Sync normalized transform (0..1) relative to print area
   useEffect(() => {
@@ -202,6 +299,8 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     const rot = ((designRect.r % 360) + 360) % 360
     const p: 'front' | 'back' | 'left' | 'right' = (placement as any)
     setDesignTransform({ placement: p, x: nx, y: ny, w: nw, h: nh, rotationDeg: rot })
+    // Persist per-placement selection if a design is chosen
+    if (designUrl) setDesignForPlacement(p, { url: designUrl, transform: { x: nx, y: ny, w: nw, h: nh, rotationDeg: rot } })
   }, [designRect, placement, designUrl, setDesignTransform])
 
   // Tokenized color matching (denim/indigo/heather etc.)
@@ -225,16 +324,16 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     return false
   }
 
-  // Update mockup image according to placement and color
+  // Update mockup image according to placement and color (fallback only when no layout template)
   useEffect(() => {
+    if (layoutTemplate?.imageUrl) return
     const p = String(placement)
-    // Prefer image matching selected color, otherwise any for the placement
     const candidates = images.filter((i) => String(i.placement || '').toLowerCase().includes(p))
     const byColor = candidates.find((i) => colorMatches(i.color_name, color))
     const pick = byColor || candidates[0]
     if (pick?.image_url) setActiveMockup(pick.image_url)
     setCanvasBg(((pick?.background_color as string) || colorHexParam || null))
-  }, [images, placement, color, colorHexParam])
+  }, [images, placement, color, colorHexParam, layoutTemplate?.imageUrl])
 
   // Sync print area to flow
   useEffect(() => {
@@ -306,7 +405,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   const onFitArea = () => {
     const tpl = getTemplate(placement)
     if (!tpl) return
-    const pad = 8
+    const pad = 4
     const w = Math.max(40, tpl.width - pad * 2)
     const h = Math.max(40, tpl.height - pad * 2)
     setDesignRect({ x: tpl.x + pad, y: tpl.y + pad, w, h, r: 0 })
@@ -323,6 +422,8 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       else if (p.includes('left')) ps.add('left')
       else if (p.includes('right')) ps.add('right')
     }
+    // Always include common placements so templates can drive UI even if images miss
+    ;['front','back','left','right'].forEach((p) => ps.add(p))
     return ['front','back','left','right'].filter((p) => ps.has(p))
   }, [templates, images])
 
@@ -415,7 +516,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                   <div className="text-sm text-white/60 mb-2">Your designs</div>
                   <div className="grid grid-cols-3 gap-2">
                     {designs.map((u) => (
-                      <button key={u} onClick={() => { setDesignUrl(u); onFitArea() }} className="relative aspect-square rounded-md overflow-hidden border border-white/10 hover:border-amber-400/40">
+                      <button key={u} onClick={() => { setDesignUrl(u); onFitArea(); }} className="relative aspect-square rounded-md overflow-hidden border border-white/10 hover:border-amber-400/40">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={u} alt="design" className="w-full h-full object-cover" />
                       </button>
@@ -462,6 +563,21 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
             <div className="flex items-center gap-2">
               <button onClick={onRotateClick} className="px-2 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-xs">Rotate 15°</button>
               <button onClick={onFitArea} className="px-2 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-xs">Fit to area</button>
+              <button
+                onClick={() => {
+                  const p = (placement || 'front') as 'front'|'back'|'left'|'right'
+                  setDesignUrl('')
+                  setDesignForPlacement(p, undefined)
+                  onFitArea()
+                }}
+                className="px-2 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-xs"
+              >Remove</button>
+              <button
+                onClick={() => {
+                  try { router.push(`/designer/${productId}/finalize`) } catch {}
+                }}
+                className="px-3 py-2 rounded-lg bg-gradient-to-r from-amber-400 to-rose-500 text-black font-medium btn-shimmer text-xs"
+              >Confirm design</button>
             </div>
           </div>
 
@@ -478,14 +594,13 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
               {(() => { const tpl = getTemplate(placement); return tpl ? (
                 <div style={{ position:'absolute', left: tpl.x, top: tpl.y, width: tpl.width, height: tpl.height }} className={`pointer-events-none ${isMoving ? 'border-2 border-dashed border-amber-300/70' : 'border border-dashed border-white/40'}`} />
               ) : null })()}
-              {/* Optional: visualize print area as invisible bounds; keep it subtle */}
-              {/* Design rect *inside* the canvas */}
+              {/* Design rect */}
               <div
                 ref={designRef}
                 onMouseDown={onDrag}
                 onWheel={onWheel}
                 style={{ position: 'absolute', left: designRect.x, top: designRect.y, width: designRect.w, height: designRect.h, transform: `rotate(${designRect.r}deg)` }}
-                className="group border-2 border-amber-400/60 rounded-md shadow-[0_10px_30px_rgba(212,175,55,0.25)] cursor-move"
+                className="group border-2 border-white/40 rounded-md shadow-[0_10px_30px_rgba(0,0,0,0.25)] cursor-move"
               >
                 {designUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element

@@ -586,7 +586,7 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
                 <button
                   key={`${normUrl(t.image_url)}|${normPlacement(t.placement).key}`}
                   onClick={() => { setSelectedImageUrl(t.image_url) }}
-                  className={`relative w-16 h-16 rounded-lg border overflow-hidden ${isActive ? 'border-amber-400/60 shadow-[0_0_0_2px_rgba(251,191,36,0.35)]' : 'border-white/10 hover:border-white/20'}`}
+                  className={`relative w-16 h-16 rounded-lg border overflow-hidden ${isActive ? 'border-white/60 shadow-[0_0_0_2px_rgba(255,255,255,0.25)]' : 'border-white/10 hover:border-white/20'}`}
                   style={{ backgroundColor: isPng(t.image_url) ? (selectedColorHex || t.background_color || 'transparent') : 'transparent' }}
                   title={normPlacement(t.placement).label}
                 >
@@ -658,7 +658,7 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
                 <button
                   key={`${normUrl(t.image_url)}|${normPlacement(t.placement).key}`}
                   onClick={() => { setSelectedImageUrl(t.image_url) }}
-                  className={`relative flex-none w-16 h-16 rounded-lg border overflow-hidden ${isActive ? 'border-amber-400/60 shadow-[0_0_0_2px_rgba(251,191,36,0.35)]' : 'border-white/10 hover:border-white/20'}`}
+                  className={`relative flex-none w-16 h-16 rounded-lg border overflow-hidden ${isActive ? 'border-white/60 shadow-[0_0_0_2px_rgba(255,255,255,0.25)]' : 'border-white/10 hover:border-white/20'}`}
                   style={{ backgroundColor: isPng(t.image_url) ? (selectedColorHex || t.background_color || 'transparent') : 'transparent' }}
                   title={normPlacement(t.placement).label}
                 >
@@ -731,7 +731,7 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
                 <button
                   key={s}
                   onClick={() => setSelectedSize(s)}
-                  className={`px-3 py-1.5 rounded-lg border text-sm ${selectedSize===s ? 'border-amber-400/40 bg-white/[0.08]' : 'border-white/10 hover:border-white/20 bg-white/[0.04]'}`}
+                  className={`px-3 py-1.5 rounded-lg border text-sm ${selectedSize===s ? 'border-white/40 bg-white/[0.08]' : 'border-white/10 hover:border-white/20 bg-white/[0.04]'}`}
                 >{s}</button>
               ))}
             </div>
