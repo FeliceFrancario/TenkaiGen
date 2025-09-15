@@ -63,6 +63,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
 
   // Design state (single image for now)
   const [designUrl, setDesignUrl] = useState<string>('')
+  const [designDims, setDesignDims] = useState<{ w: number; h: number } | null>(null)
   const [designRect, setDesignRect] = useState<{ x: number; y: number; w: number; h: number; r: number }>({ x: 0, y: 0, w: 0, h: 0, r: 0 })
   const [activeTab, setActiveTab] = useState<'ai' | 'uploads' | 'text'>('ai')
   const [selectedStyle, setSelectedStyle] = useState<string | undefined>(undefined)
@@ -290,22 +291,49 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     return () => { mounted = false }
   }, [])
 
+  // Load natural dimensions of the selected design to preserve aspect ratio
+  useEffect(() => {
+    if (!designUrl) { setDesignDims(null); return }
+    const ImgCtor: any = typeof window !== 'undefined' && (window as any).Image ? (window as any).Image : (globalThis as any).Image
+    const img = new ImgCtor()
+    img.onload = () => {
+      const w = (img as HTMLImageElement).naturalWidth || 0
+      const h = (img as HTMLImageElement).naturalHeight || 0
+      if (w > 0 && h > 0) setDesignDims({ w, h })
+    }
+    img.src = designUrl
+    return () => { img.onload = null as any }
+  }, [designUrl])
+
   // Fit the design inside the print area by default
   useEffect(() => {
     const tpl = getTemplate(placement)
     if (!tpl) return
-    // Assume canvas is 800px max area; scale proportionally
-    const maxW = 800
-    const scale = 1
-    const areaW = tpl.width * scale
-    const areaH = tpl.height * scale
-    const x = tpl.x * scale
-    const y = tpl.y * scale
+    const areaW = tpl.width
+    const areaH = tpl.height
+    const x0 = tpl.x
+    const y0 = tpl.y
     const pad = 4
-    const w = Math.max(40, areaW - pad * 2)
-    const h = Math.max(40, areaH - pad * 2)
-    setDesignRect({ x: x + pad, y: y + pad, w, h, r: 0 })
-  }, [templates, placement, layoutTemplate])
+    // Preserve aspect ratio of the design if known; otherwise use a reasonable default
+    if (designDims) {
+      const maxW = Math.max(40, areaW - pad * 2)
+      const maxH = Math.max(40, areaH - pad * 2)
+      const s = Math.min(maxW / designDims.w, maxH / designDims.h)
+      const w = Math.max(40, Math.floor(designDims.w * s))
+      const h = Math.max(40, Math.floor(designDims.h * s))
+      // center inside print area
+      const cx = x0 + Math.floor((areaW - w) / 2)
+      const cy = y0 + Math.floor((areaH - h) / 2)
+      setDesignRect({ x: cx, y: cy, w, h, r: 0 })
+    } else {
+      // Default to 60% of print area while keeping it obviously smaller than full area
+      const w = Math.max(40, Math.floor((areaW - pad * 2) * 0.6))
+      const h = Math.max(40, Math.floor((areaH - pad * 2) * 0.6))
+      const cx = x0 + Math.floor((areaW - w) / 2)
+      const cy = y0 + Math.floor((areaH - h) / 2)
+      setDesignRect({ x: cx, y: cy, w, h, r: 0 })
+    }
+  }, [templates, placement, layoutTemplate, designDims])
 
   // Initial clear when the designer mounts so no design is preselected
   useEffect(() => {
@@ -316,8 +344,23 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   useEffect(() => {
     const key = (placement || 'front') as 'front'|'back'|'left'|'right'
     const saved = designsByPlacement[key]
-    if (saved?.url) setDesignUrl(saved.url)
-    else { setDesignUrl(''); onFitArea() }
+    if (saved?.url) {
+      setDesignUrl(saved.url)
+      const tpl = getTemplate(placement)
+      if (tpl && saved.transform) {
+        const x = tpl.x + Math.round((saved.transform.x || 0) * tpl.width)
+        const y = tpl.y + Math.round((saved.transform.y || 0) * tpl.height)
+        const w = Math.max(40, Math.round((saved.transform.w || 0) * tpl.width))
+        const h = Math.max(40, Math.round((saved.transform.h || 0) * tpl.height))
+        const r = saved.transform.rotationDeg || 0
+        setDesignRect({ x, y, w, h, r })
+      } else {
+        onFitArea()
+      }
+    } else {
+      setDesignUrl('')
+      onFitArea()
+    }
     // Intentionally do NOT depend on designsByPlacement to avoid update loops
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placement])
@@ -380,6 +423,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   // Drag/scale/rotate handlers (simple)
   const onDrag: React.MouseEventHandler<HTMLDivElement> = (e) => {
     if (!designRef.current || !canvasRef.current) return
+    e.preventDefault()
     const startX = e.clientX
     const startY = e.clientY
     const start = { ...designRect }
@@ -440,10 +484,27 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   const onFitArea = () => {
     const tpl = getTemplate(placement)
     if (!tpl) return
+    const areaW = tpl.width
+    const areaH = tpl.height
+    const x0 = tpl.x
+    const y0 = tpl.y
     const pad = 4
-    const w = Math.max(40, tpl.width - pad * 2)
-    const h = Math.max(40, tpl.height - pad * 2)
-    setDesignRect({ x: tpl.x + pad, y: tpl.y + pad, w, h, r: 0 })
+    if (designDims) {
+      const maxW = Math.max(40, areaW - pad * 2)
+      const maxH = Math.max(40, areaH - pad * 2)
+      const s = Math.min(maxW / designDims.w, maxH / designDims.h)
+      const w = Math.max(40, Math.floor(designDims.w * s))
+      const h = Math.max(40, Math.floor(designDims.h * s))
+      const cx = x0 + Math.floor((areaW - w) / 2)
+      const cy = y0 + Math.floor((areaH - h) / 2)
+      setDesignRect({ x: cx, y: cy, w, h, r: 0 })
+    } else {
+      const w = Math.max(40, Math.floor((areaW - pad * 2) * 0.6))
+      const h = Math.max(40, Math.floor((areaH - pad * 2) * 0.6))
+      const cx = x0 + Math.floor((areaW - w) / 2)
+      const cy = y0 + Math.floor((areaH - h) / 2)
+      setDesignRect({ x: cx, y: cy, w, h, r: 0 })
+    }
   }
 
   const placementsAvail = useMemo(() => {
@@ -521,13 +582,25 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       <div className="grid grid-cols-[56px_320px_1fr] gap-4">
         {/* Vertical icon sidebar */}
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-2 flex flex-col items-center gap-2">
-          <button title="AI" onClick={() => setActiveTab('ai')} className={`w-10 h-10 flex items-center justify-center rounded-lg border ${activeTab==='ai' ? 'border-amber-400/40 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'}`}>
+          <button
+            title="AI"
+            onClick={() => setActiveTab('ai')}
+            className={`${activeTab==='ai' ? 'border-amber-400/40 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'} w-10 h-10 flex items-center justify-center rounded-lg border`}
+          >
             <Sparkles className="w-5 h-5" />
           </button>
-          <button title="Uploads" onClick={() => setActiveTab('uploads')} className={`w-10 h-10 flex items-center justify-center rounded-lg border ${activeTab==='uploads' ? 'border-amber-400/40 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'}`}>
+          <button
+            title="Uploads"
+            onClick={() => setActiveTab('uploads')}
+            className={`${activeTab==='uploads' ? 'border-amber-400/40 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'} w-10 h-10 flex items-center justify-center rounded-lg border`}
+          >
             <Upload className="w-5 h-5" />
           </button>
-          <button title="Text" onClick={() => setActiveTab('text')} className={`w-10 h-10 flex items-center justify-center rounded-lg border ${activeTab==='text' ? 'border-amber-400/40 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'}`}>
+          <button
+            title="Text"
+            onClick={() => setActiveTab('text')}
+            className={`${activeTab==='text' ? 'border-amber-400/40 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'} w-10 h-10 flex items-center justify-center rounded-lg border`}
+          >
             <TypeIcon className="w-5 h-5" />
           </button>
         </div>
@@ -651,11 +724,11 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                 onMouseDown={onDrag}
                 onWheel={onWheel}
                 style={{ position: 'absolute', left: designRect.x, top: designRect.y, width: designRect.w, height: designRect.h, transform: `rotate(${designRect.r}deg)` }}
-                className="group border-2 border-white/40 rounded-md shadow-[0_10px_30px_rgba(0,0,0,0.25)] cursor-move"
+                className={`group rounded-md ${isMoving ? 'cursor-grabbing border-2 border-white/50' : 'cursor-grab border border-transparent hover:border-white/30'}`}
               >
                 {designUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={designUrl} alt="design" className="w-full h-full object-contain" />
+                  <img src={designUrl} alt="design" className="w-full h-full object-contain select-none" onDragStart={(e) => e.preventDefault()} />
                 ) : (
                   <div className="w-full h-full grid place-items-center text-xs text-white/50">Pick a design</div>
                 )}
