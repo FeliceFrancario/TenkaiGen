@@ -56,7 +56,10 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     areaW: number
     areaH: number
     imageUrl?: string | null
+    backgroundUrl?: string | null
+    backgroundColor?: string | null
   } | null>(null)
+  const [availablePlacements, setAvailablePlacements] = useState<string[]>([])
 
   // Design state (single image for now)
   const [designUrl, setDesignUrl] = useState<string>('')
@@ -180,10 +183,11 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     let mounted = true
     ;(async () => {
       try {
+        const v1ProductId = (product && (product as any).id) ? (product as any).id : productId
         // 1) Resolve v1 variant_id by color+size
         let v1variant: number | null = null
         try {
-          const vres = await fetch(`/api/printful/variants?product_id=${productId}`)
+          const vres = await fetch(`/api/printful/variants?product_id=${v1ProductId}`)
           if (vres.ok) {
             const vj = await vres.json()
             const list: any[] = vj?.result || []
@@ -195,23 +199,45 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
         setVariantId(v1variant)
 
         // 2) Fetch layout templates
-        const tres = await fetch(`/api/printful/templates?product_id=${productId}`)
+        const tres = await fetch(`/api/printful/templates?product_id=${v1ProductId}`)
         if (!tres.ok) return
         const tjson = await tres.json()
         const tplResult = tjson?.result || {}
         const templatesArr: any[] = Array.isArray(tplResult?.templates) ? tplResult.templates : []
         const mappingArr: any[] = Array.isArray(tplResult?.variant_mapping) ? tplResult.variant_mapping : []
 
+        // Compute available placements for this variant
+        const normalize = (s: string) => {
+          const v = String(s || '').toLowerCase()
+          if (v.includes('sleeve_left')) return 'left'
+          if (v.includes('sleeve_right')) return 'right'
+          if (v.includes('back')) return 'back'
+          if (v.includes('front')) return 'front'
+          return ''
+        }
+        if (v1variant) {
+          const vm = mappingArr.find((m: any) => Number(m?.variant_id) === Number(v1variant))
+          const raw: string[] = Array.isArray(vm?.templates) ? vm.templates.map((t: any) => normalize(String(t?.placement || ''))) : []
+          const allowedSet = new Set<string>(raw.filter((p: string) => p && ['front','back','left','right'].includes(p)))
+          setAvailablePlacements(Array.from(allowedSet) as string[])
+        } else {
+          setAvailablePlacements([])
+        }
+
         // Determine template_id for our variant+placement
         let templateId: number | null = null
         if (v1variant) {
           const vm = mappingArr.find((m: any) => Number(m?.variant_id) === Number(v1variant))
-          const tForPlacement = Array.isArray(vm?.templates) ? vm.templates.find((t: any) => String(t?.placement||'').toLowerCase().includes(placement)) : null
+          const tForPlacement = Array.isArray(vm?.templates)
+            ? (vm.templates.find((t: any) => String(t?.placement||'').toLowerCase() === String(placement).toLowerCase())
+              || vm.templates.find((t: any) => String(t?.placement||'').toLowerCase().includes(placement)))
+            : null
           templateId = Number(tForPlacement?.template_id) || null
         }
         // Fallback: pick any template matching placement
         if (!templateId) {
-          const anyT = templatesArr.find((t: any) => String(t?.placement||'').toLowerCase().includes(placement))
+          const anyT = templatesArr.find((t: any) => String(t?.placement||'').toLowerCase() === String(placement).toLowerCase())
+            || templatesArr.find((t: any) => String(t?.placement||'').toLowerCase().includes(placement))
           templateId = Number(anyT?.template_id) || null
         }
         if (!templateId) return
@@ -227,17 +253,26 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
           areaW: Number(selected?.print_area_width || 0),
           areaH: Number(selected?.print_area_height || 0),
           imageUrl: selected?.image_url || null,
+          backgroundUrl: selected?.background_url || null,
+          backgroundColor: selected?.background_color || null,
         }
         if (!mounted) return
         setLayoutTemplate(lt)
         // Use template image for consistent base
         if (lt.imageUrl) setActiveMockup(lt.imageUrl)
-        // Avoid coloring canvas when using template image
-        setCanvasBg(null)
       } catch {}
     })()
     return () => { mounted = false }
   }, [productId, color, size, placement])
+
+  // Ensure current placement is valid for this variant; pick a default if not
+  useEffect(() => {
+    if (availablePlacements.length === 0) return
+    if (!availablePlacements.includes(placement)) {
+      const next = availablePlacements.includes('front') ? 'front' : availablePlacements[0]
+      setPlacement(next)
+    }
+  }, [availablePlacements])
 
   // Load user B2 designs list (S3-compatible)
   useEffect(() => {
@@ -412,8 +447,16 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   }
 
   const placementsAvail = useMemo(() => {
+    if (availablePlacements.length > 0) return availablePlacements
     const ps = new Set<string>()
-    for (const t of templates) ps.add(t.placement)
+    for (const t of templates) {
+      const p = String(t.placement || '').toLowerCase()
+      if (p.includes('label') || p.includes('embroid')) continue
+      if (p.includes('front')) ps.add('front')
+      else if (p.includes('back')) ps.add('back')
+      else if (p.includes('left')) ps.add('left')
+      else if (p.includes('right')) ps.add('right')
+    }
     for (const i of images) {
       const p = String(i.placement || '').toLowerCase()
       if (p.includes('label') || p.includes('embroid')) continue
@@ -422,10 +465,8 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       else if (p.includes('left')) ps.add('left')
       else if (p.includes('right')) ps.add('right')
     }
-    // Always include common placements so templates can drive UI even if images miss
-    ;['front','back','left','right'].forEach((p) => ps.add(p))
     return ['front','back','left','right'].filter((p) => ps.has(p))
-  }, [templates, images])
+  }, [availablePlacements, templates, images])
 
   // Generate flow (AI tab)
   const handleGenerate = async () => {
@@ -582,7 +623,17 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
           </div>
 
           <div className="mt-3 relative overflow-auto">
-            <div ref={canvasRef} className="relative mx-auto max-w-[900px]" style={{ backgroundColor: canvasBg || undefined }}>
+            <div
+              ref={canvasRef}
+              className="relative mx-auto max-w-[900px]"
+              style={{
+                backgroundColor: (canvasBg as string | undefined) || (layoutTemplate?.backgroundColor as string | undefined) || undefined,
+                backgroundImage: layoutTemplate?.backgroundUrl ? `url(${layoutTemplate.backgroundUrl})` : undefined,
+                backgroundSize: layoutTemplate?.backgroundUrl ? 'cover' : undefined,
+                backgroundPosition: layoutTemplate?.backgroundUrl ? 'center' : undefined,
+                backgroundRepeat: layoutTemplate?.backgroundUrl ? 'no-repeat' : undefined,
+              }}
+            >
               {activeMockup ? (
                 <Image src={activeMockup} alt="mockup" width={900} height={900} className="w-full h-auto object-contain opacity-90 saturate-[0.85]" />
               ) : (
