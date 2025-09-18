@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { Providers } from '@/components/providers'
+import { AuthHeader } from '@/components/auth-header'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -26,6 +27,7 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={`${inter.className} min-h-screen bg-tenkai-dark overflow-x-hidden`}>
         <Providers>
+          <div className="fixed top-4 right-4 z-50"><AuthHeader /></div>
           {children}
         </Providers>
       </body>

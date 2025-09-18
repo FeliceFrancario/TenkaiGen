@@ -11,18 +11,12 @@ export default function HomePage() {
         {/*<span className="h-8 w-8 rounded-xl bg-gradient-to-br from-tenkai-gold to-red-500 shadow-[0_8px_30px_rgba(212,175,55,0.25)]" />*/}
         <span className="text-white/90 font-semibold tracking-wide">TenkaiGen</span>
       </Link>
-      {/* Top-right auth header like Suno */}
-      <div className="absolute top-4 right-4 z-20 flex gap-3">
-        <Link href="/signin" className="px-4 py-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition">Sign In</Link>
-        <Link href="/signup" className="px-4 py-2 rounded-full bg-white text-black hover:opacity-90 transition">Sign Up</Link>
-      </div>
+      {/* Global AuthHeader is provided by layout */}
       <Hero />
       {/* High-quality apparel row (repurposed ProductShowcase) */}
       <ProductShowcase />
       {/* Pricing section (repurposed HowItWorks) */}
       <HowItWorks />
-      
-      
     </main>
   )
 }
