@@ -19,3 +19,5 @@ pnpm-debug.log*
 *.log
 .eslintcache
 .turbo/
+
+.cursor/

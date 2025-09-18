@@ -65,9 +65,9 @@ export default async function CatalogCategoryPage({ params }: { params: Promise<
             </span>
           ))}
         </div>
-        <h1 className="text-3xl font-semibold bg-clip-text text-transparent bg-gradient-to-r from-amber-300 via-rose-300 to-amber-200 drop-shadow">{cat?.title || 'Category'}</h1>
+        <h1 className="text-3xl font-semibold text-amber-200 drop-shadow">{cat?.title || 'Category'}</h1>
         {cat?.image_url ? (
-          <div className="mt-3 relative w-full max-w-3xl aspect-[4/2] rounded-xl overflow-hidden bg-gradient-to-br from-amber-500/15 via-rose-500/10 to-transparent border border-amber-400/30 shadow-[0_0_40px_rgba(251,191,36,0.25)]">
+          <div className="mt-3 relative w-full max-w-3xl aspect-[4/2] rounded-xl overflow-hidden bg-white/5 border border-white/10">
             <Image src={cat.image_url} alt={cat.title} fill sizes="100vw" className="object-cover" />
           </div>
         ) : null}
@@ -75,23 +75,22 @@ export default async function CatalogCategoryPage({ params }: { params: Promise<
 
       {children.length > 0 && (
         <section className="mb-10">
-          <h2 className="text-lg font-semibold mb-3 text-white/90">Subcategories</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
             {children.map((sc) => (
               <a
                 key={sc.id}
                 href={`/catalog/${sc.id}`}
-                className="group relative rounded-xl border border-amber-400/20 bg-gradient-to-br from-amber-500/10 via-rose-500/5 to-transparent p-4 text-center hover:border-amber-400/40 hover:shadow-[0_0_30px_rgba(251,191,36,0.25)] transition"
+                className="group relative rounded-2xl overflow-hidden border border-rose-400/25 bg-white/[0.035] transition hover:border-rose-400/50 hover:shadow-[0_18px_50px_rgba(244,63,94,0.22)] hover:translate-y-[-2px] active:translate-y-0"
               >
-                <div className="absolute inset-0 rounded-xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity btn-shimmer" />
-                <div className="font-medium text-sm text-amber-100">{sc.title}</div>
-                {sc.image_url ? (
-                  <div className="mt-3 relative w-full aspect-[4/3] rounded overflow-hidden bg-white/5">
+                <div className="relative aspect-square bg-white/5">
+                  {sc.image_url ? (
                     <Image src={sc.image_url} alt={sc.title} fill sizes="(max-width: 768px) 50vw, 25vw" className="object-cover" />
-                  </div>
-                ) : (
-                  <div className="mt-3 relative w-full aspect-[4/3] rounded bg-white/5" />
-                )}
+                  ) : null}
+                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(244,63,94,0.16),transparent_55%)]" />
+                </div>
+                <div className="p-3 text-center">
+                  <div className="font-medium text-sm text-amber-200">{sc.title}</div>
+                </div>
               </a>
             ))}
           </div>
@@ -102,21 +101,22 @@ export default async function CatalogCategoryPage({ params }: { params: Promise<
         products.length === 0 ? (
           <p className="text-white/60">No products found for this category.</p>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
             {products.map((p) => (
               <Link
                 key={p.id}
                 href={`/catalog/product/${p.id}`}
-                className="group rounded-xl border border-amber-400/20 bg-gradient-to-br from-amber-500/10 via-rose-500/5 to-transparent p-4 text-center hover:border-amber-400/40 hover:shadow-[0_0_30px_rgba(251,191,36,0.25)] transition"
+                className="group rounded-2xl overflow-hidden border border-rose-400/25 bg-white/[0.035] transition hover:border-rose-400/50 hover:shadow-[0_18px_50px_rgba(244,63,94,0.22)] hover:translate-y-[-2px] active:translate-y-0"
               >
-                <div className="font-medium text-sm text-amber-100">{p.title}</div>
-                {p.thumbnail ? (
-                  <div className="mt-3 relative w-full aspect-[4/3] rounded overflow-hidden bg-white/5">
+                <div className="relative aspect-square bg-white/5">
+                  {p.thumbnail ? (
                     <Image src={p.thumbnail} alt={p.title} fill sizes="(max-width: 768px) 50vw, 33vw" className="object-cover" />
-                  </div>
-                ) : (
-                  <div className="mt-3 relative w-full aspect-[4/3] rounded bg-white/5" />
-                )}
+                  ) : null}
+                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(244,63,94,0.16),transparent_55%)]" />
+                </div>
+                <div className="p-3 text-center">
+                  <div className="font-medium text-sm text-amber-200">{p.title}</div>
+                </div>
               </Link>
             ))}
           </div>

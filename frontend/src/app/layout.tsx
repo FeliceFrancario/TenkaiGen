@@ -25,7 +25,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.className} min-h-screen bg-tenkai-dark overflow-x-hidden`}>
+      <body className={`${inter.className} min-h-screen bg-tenkai-dark overflow-x-hidden relative`}>
+        {/* Global background gradients (clean Night Blue) */}
+        <div aria-hidden className="pointer-events-none fixed inset-0 -z-10">
+          <div className="absolute inset-0 bg-[radial-gradient(1200px_700px_at_20%_-10%,rgba(45,84,94,0.6),transparent),radial-gradient(1000px_520px_at_110%_120%,rgba(18,52,59,0.55),transparent)]" />
+        </div>
         <Providers>
           <div className="fixed top-4 right-4 z-50"><AuthHeader /></div>
           {children}
