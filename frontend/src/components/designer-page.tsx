@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useFlow } from '@/components/flow-provider'
 import { STYLES } from '@/lib/styles'
 import { Sparkles, Upload, Type as TypeIcon, ArrowLeft } from 'lucide-react'
+import { createClient } from '@/lib/supabase/browser'
 
 // Removed Printful logo constant
 
@@ -35,6 +36,21 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   const [size] = useState<string | undefined>(fromParams('size'))
 
   const { isGenerating, setGenerating, setStyle: setFlowStyle, setPrompt: setFlowPrompt, setPrintArea, setDesignUrl: setFlowDesignUrl, setDesignTransform, designsByPlacement, setDesignForPlacement } = useFlow()
+
+  // Auth state for gating confirm
+  const supabase = createClient()
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false)
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      const { data } = await supabase.auth.getUser()
+      if (!mounted) return
+      setUserEmail(data.user?.email ?? null)
+    })()
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => setUserEmail(session?.user?.email ?? null))
+    return () => { sub.subscription?.unsubscribe() }
+  }, [supabase])
 
   // Mockup templates (print areas) - legacy (catalog blank-images); kept as fallback imagery
   const [templates, setTemplates] = useState<TemplatePlacement[]>([])
@@ -687,8 +703,44 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                 className="px-2 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-xs"
               >Remove</button>
               <button
-                onClick={() => {
-                  try { router.push(`/designer/${productId}/finalize`) } catch {}
+                onClick={async () => {
+                  try {
+                    // Persist draft to sessionStorage for finalize page
+                    const draft = {
+                      product_id: productId,
+                      color: color || null,
+                      size: size || null,
+                      designs_by_placement: designsByPlacement,
+                      prompt: prompt || null,
+                      style: selectedStyle || null,
+                      ts: Date.now(),
+                    }
+                    if (typeof window !== 'undefined') {
+                      window.sessionStorage.setItem('designDraft', JSON.stringify(draft))
+                    }
+                    const finalizePath = `/designer/${productId}/finalize`
+                    if (!userEmail) {
+                      setShowAuthPrompt(true)
+                    } else {
+                      // Best-effort server persistence
+                      try {
+                        const { data } = await supabase.auth.getUser()
+                        const userId = data.user?.id
+                        if (userId) {
+                          await supabase.from('design_drafts').upsert({
+                            user_id: userId,
+                            product_id: productId,
+                            color: draft.color,
+                            size: draft.size,
+                            designs_by_placement: draft.designs_by_placement,
+                            prompt: draft.prompt,
+                            style: draft.style,
+                          })
+                        }
+                      } catch {}
+                      router.push(finalizePath)
+                    }
+                  } catch {}
                 }}
                 className="px-3 py-2 rounded-lg bg-gradient-to-r from-amber-400 to-rose-500 text-black font-medium btn-shimmer text-xs"
               >Confirm design</button>
@@ -737,6 +789,21 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
           </div>
         </div>
       </div>
+
+      {/* Auth prompt modal */}
+      {showAuthPrompt && !userEmail && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/[0.06] p-5">
+            <div className="text-white/90 font-medium mb-1">Sign in to continue</div>
+            <div className="text-white/60 text-sm mb-4">You need to login to save your design and create the order.</div>
+            <div className="flex gap-3">
+              <a href={`/signin?returnUrl=${encodeURIComponent(`/designer/${productId}/finalize`)}`} className="px-4 py-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition text-sm">Sign In</a>
+              <a href={`/signup?returnUrl=${encodeURIComponent(`/designer/${productId}/finalize`)}`} className="px-4 py-2 rounded-full bg-white text-black hover:opacity-90 transition text-sm">Sign Up</a>
+              <button onClick={() => setShowAuthPrompt(false)} className="ml-auto px-3 py-1.5 rounded-md border border-white/10 text-white/70 text-xs">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

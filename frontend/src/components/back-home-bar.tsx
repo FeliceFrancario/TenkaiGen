@@ -1,16 +1,30 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 
 export default function BackHomeBar() {
   const router = useRouter()
+  const pathname = usePathname()
+  const onBack = () => {
+    try {
+      if (pathname && /^\/designer\/(\d+)\/finalize$/.test(pathname)) {
+        const m = pathname.match(/^\/designer\/(\d+)\/finalize$/)
+        const id = m ? m[1] : null
+        if (id) {
+          router.replace(`/designer/${id}`)
+          return
+        }
+      }
+    } catch {}
+    router.back()
+  }
   return (
     <div className="fixed top-4 left-4 z-50 flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 backdrop-blur-md px-2 py-1 shadow-lg">
       <button
         aria-label="Go back"
-        onClick={() => router.back()}
+        onClick={onBack}
         className="flex items-center gap-1 rounded-lg px-2 py-1 text-white/80 hover:text-white hover:bg-white/10 transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />

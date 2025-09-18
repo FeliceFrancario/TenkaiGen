@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
 
 export default function SignInPage() {
@@ -8,24 +8,36 @@ export default function SignInPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [status, setStatus] = useState<string | null>(null)
+  const [returnUrl, setReturnUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const r = params.get('returnUrl')
+      setReturnUrl(r)
+    } catch {}
+  }, [])
 
   const signInWithEmailPassword = async (e: React.FormEvent) => {
     e.preventDefault()
     setStatus(null)
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    setStatus(error ? error.message : null)
+    if (error) setStatus(error.message)
+    else window.location.href = returnUrl || '/'
   }
 
   const signInWithEmailLink = async (e: React.FormEvent) => {
     e.preventDefault()
     setStatus(null)
-    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } })
+    const redirectTo = returnUrl ? `${window.location.origin}${returnUrl}` : window.location.origin
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } })
     setStatus(error ? error.message : 'Check your email for the sign-in link')
   }
 
   const signInWithGoogle = async () => {
     setStatus(null)
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } })
+    const redirectTo = returnUrl ? `${window.location.origin}${returnUrl}` : window.location.origin
+    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } })
     if (error) setStatus(error.message)
   }
 

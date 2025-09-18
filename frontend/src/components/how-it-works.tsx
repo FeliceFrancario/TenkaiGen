@@ -44,14 +44,7 @@ export function HowItWorks() {
   ]
 
   return (
-    <section className="py-20 px-4 sm:px-6 lg:px-8 bg-tenkai-dark-secondary relative overflow-hidden">
-      {/* background accents */}
-      <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute inset-[-25%] animate-aurora opacity-40" />
-        <div className="absolute -left-10 top-12 w-[24rem] h-[24rem] bg-tenkai-gold/10 blur-[120px] rounded-full" />
-        <div className="absolute -right-10 bottom-10 w-[22rem] h-[22rem] bg-red-600/10 blur-[120px] rounded-full" />
-      </div>
-
+    <section className="py-20 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
       <div className="max-w-7xl mx-auto fade-in-up">
         <div className="text-center mb-10">
           <h2 className="text-3xl md:text-5xl font-bold text-white mb-3">Pricing</h2>

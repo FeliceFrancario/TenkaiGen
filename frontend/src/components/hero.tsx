@@ -118,13 +118,6 @@ export function Hero() {
 
   return (
     <section className="pt-24 sm:pt-28 pb-10 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
-      {/* animated aurora + subtle background glows */}
-      <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute inset-[-20%] animate-aurora opacity-60" />
-        <div className="absolute right-[20%] top-20 w-[22rem] h-[22rem] bg-tenkai-silver/10 blur-[120px] rounded-full" />
-        <div className="absolute right-10 bottom-10 w-[26rem] h-[26rem] bg-red-600/15 blur-[140px] rounded-full float-soft" />
-      </div>
-
       <div className="relative max-w-5xl mx-auto text-center space-y-4 fade-in-up">
         <h1 className="relative z-10 text-4xl md:text-6xl font-semibold tracking-tight text-white">
           {typed}
@@ -152,10 +145,23 @@ export function Hero() {
         <p className="relative z-10 text-sm md:text-base text-white/70">Start with a prompt or choose a product first — your design, your flow.</p>
       </div>
 
+      {/* Expanded background sparkles between headline and input */}
+      <div className="pointer-events-none absolute inset-x-0 top-40 md:top-44 h-[260px] -z-10">
+        <SparklesCore
+          background="transparent"
+          minSize={0.4}
+          maxSize={1.1}
+          particleDensity={200}
+          className="w-full h-full"
+          particleColor="#D4AF37"
+          speed={0.35}
+        />
+      </div>
+
       {/* Input Section */}
-      <div className="max-w-3xl mx-auto mt-10 fade-in-up" style={{ animationDelay: '80ms' }}>
+      <div className="max-w-3xl mx-auto mt-6 fade-in-up" style={{ animationDelay: '80ms' }}>
         {/* Chat-like Input - single inline row */}
-        <div className="relative rounded-2xl bg-white/[0.02] backdrop-blur-xl transition-all border border-red-600/30 hover:border-red-500/40 focus-within:border-red-400/50 focus-within:ring-1 focus-within:ring-tenkai-gold/40 shadow-[0_20px_80px_rgba(0,0,0,0.35)] shadow-[0_8px_30px_rgba(212,175,55,0.12)]">
+        <div className="relative rounded-2xl bg-white/[0.05] backdrop-blur-xl transition-all border border-white/15 hover:border-tenkai-gold/30 hover:ring-1 hover:ring-tenkai-gold/15 focus-within:border-tenkai-gold/40 focus-within:ring-1 focus-within:ring-tenkai-gold/25 shadow-[0_12px_40px_rgba(0,0,0,0.28)]">
           <div className="flex items-center gap-2 px-2 py-2">
             <button
               type="button"
@@ -179,7 +185,7 @@ export function Hero() {
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={onKeyDown}
               placeholder="Describe your design idea"
-              className="flex-1 min-h-[44px] max-h-40 bg-transparent text-sm placeholder:text-white/40 text-white border-0 outline-none focus:outline-none focus:ring-0 ring-0 resize-none px-2 py-2 rounded-none"
+              className="flex-1 min-h-[44px] max-h-40 bg-transparent text-sm placeholder:text-white/45 text-white border-0 outline-none focus:outline-none focus:ring-0 ring-0 resize-none px-2 py-2 rounded-none"
             />
 
             <button

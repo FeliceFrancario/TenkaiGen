@@ -45,7 +45,7 @@ export function ProductShowcase() {
   }
 
   return (
-    <section className="py-20 px-4 sm:px-6 lg:px-8 bg-tenkai-dark relative">
+    <section className="py-20 px-4 sm:px-6 lg:px-8 relative">
       <div className="max-w-7xl mx-auto">
         <div className="flex items-end justify-between mb-6 flex-wrap gap-3">
           <div>
@@ -54,10 +54,6 @@ export function ProductShowcase() {
           </div>
           <button onClick={() => router.push('/catalog')} className="hidden sm:inline-flex btn-shimmer px-4 py-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition">Explore all</button>
         </div>
-
-        {/* edge gradient fades */}
-        <div className="pointer-events-none absolute left-0 top-[160px] bottom-10 w-12 bg-gradient-to-r from-tenkai-dark to-transparent" />
-        <div className="pointer-events-none absolute right-0 top-[160px] bottom-10 w-12 bg-gradient-to-l from-tenkai-dark to-transparent" />
 
         <div className="relative overflow-x-auto no-scrollbar snap-x snap-mandatory">
           <div className="flex gap-5 min-w-max px-1">
@@ -75,7 +71,7 @@ export function ProductShowcase() {
                   <div
                     key={p.id}
                     onClick={() => router.push('/catalog')}
-                    className="snap-start w-56 shrink-0 cursor-pointer rounded-2xl bg-white/[0.03] border border-white/10 hover:border-tenkai-gold/40 hover:bg-white/[0.06] transition-all shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_14px_40px_rgba(212,175,55,0.18)] hover:-translate-y-0.5"
+                    className="snap-start w-56 shrink-0 cursor-pointer rounded-2xl bg-white/[0.03] border border-white/10 hover:border-tenkai-gold/50 transition-all shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_14px_40px_rgba(212,175,55,0.18)] hover:-translate-y-0.5"
                   >
                     <div className="h-40 rounded-t-2xl bg-gradient-to-br from-tenkai-silver/20 via-white/10 to-transparent flex items-center justify-center overflow-hidden">
                       {p.thumbnail ? (

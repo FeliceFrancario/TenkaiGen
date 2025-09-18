@@ -80,7 +80,7 @@ export default async function CatalogCategoryPage({ params }: { params: Promise<
               <a
                 key={sc.id}
                 href={`/catalog/${sc.id}`}
-                className="group relative rounded-2xl overflow-hidden border border-rose-400/25 bg-white/[0.035] transition hover:border-rose-400/50 hover:shadow-[0_18px_50px_rgba(244,63,94,0.22)] hover:translate-y-[-2px] active:translate-y-0"
+                className="group relative rounded-2xl overflow-hidden border border-amber-400/25 bg-white/[0.035] transition hover:border-amber-400/60 hover:shadow-[0_18px_50px_rgba(244,63,94,0.22),0_10px_24px_rgba(212,175,55,0.18)] hover:translate-y-[-2px] active:translate-y-0"
               >
                 <div className="relative aspect-square bg-white/5">
                   {sc.image_url ? (
@@ -106,7 +106,7 @@ export default async function CatalogCategoryPage({ params }: { params: Promise<
               <Link
                 key={p.id}
                 href={`/catalog/product/${p.id}`}
-                className="group rounded-2xl overflow-hidden border border-rose-400/25 bg-white/[0.035] transition hover:border-rose-400/50 hover:shadow-[0_18px_50px_rgba(244,63,94,0.22)] hover:translate-y-[-2px] active:translate-y-0"
+                className="group rounded-2xl overflow-hidden border border-amber-400/25 bg-white/[0.035] transition hover:border-amber-400/60 hover:shadow-[0_18px_50px_rgba(244,63,94,0.22),0_10px_24px_rgba(212,175,55,0.18)] hover:translate-y-[-2px] active:translate-y-0"
               >
                 <div className="relative aspect-square bg-white/5">
                   {p.thumbnail ? (

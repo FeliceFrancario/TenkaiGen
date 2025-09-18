@@ -48,7 +48,7 @@ export default async function CatalogHome() {
             <Link
               key={c.id}
               href={`/catalog/${c.id}`}
-              className="group rounded-2xl overflow-hidden border border-amber-400/25 bg-white/[0.035] transition shadow-[0_8px_30px_rgba(0,0,0,0.18)] hover:border-rose-400/50 hover:shadow-[0_18px_50px_rgba(244,63,94,0.22)] hover:translate-y-[-2px] active:translate-y-0 will-change-transform"
+              className="group rounded-2xl overflow-hidden border border-amber-400/25 bg-white/[0.035] transition shadow-[0_8px_30px_rgba(0,0,0,0.18)] hover:border-amber-400/60 hover:shadow-[0_18px_50px_rgba(244,63,94,0.22),0_10px_24px_rgba(212,175,55,0.18)] hover:translate-y-[-2px] active:translate-y-0 will-change-transform"
             >
               <div className="relative aspect-square bg-white/5">
                 {c.image_url && (
