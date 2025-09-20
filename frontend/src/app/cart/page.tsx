@@ -23,6 +23,7 @@ export default function CartPage() {
   const [loading, setLoading] = useState(true)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [prices, setPrices] = useState<Record<string, { amount: number; currency: string }>>({})
+  const [titles, setTitles] = useState<Record<number, string>>({})
   const [country, setCountry] = useState('US')
   const [stateCode, setStateCode] = useState('')
   const [shippingRates, setShippingRates] = useState<Array<{ name: string; rate: number; currency: string }>>([])
@@ -101,12 +102,29 @@ export default function CartPage() {
 
   useEffect(() => { if (items.length) fetchPrices(items) }, [items])
 
+  const fetchTitles = async (itemsToQuery: CartItem[]) => {
+    const distinct = Array.from(new Set(itemsToQuery.map((i) => i.product_id)))
+    const map: Record<number, string> = {}
+    await Promise.all(distinct.map(async (pid) => {
+      try {
+        const r = await fetch(`/api/printful/product?product_id=${pid}`)
+        const j = await r.json().catch(() => ({}))
+        const title = j?.result?.title as string | undefined
+        if (title) map[pid] = title
+      } catch {}
+    }))
+    setTitles(map)
+  }
+
+  useEffect(() => { if (items.length) fetchTitles(items) }, [items])
+
   const updateQty = async (id: string, next: number) => {
     if (next < 1) return
     setUpdatingId(id)
     try {
       await supabase.from('cart_items').update({ quantity: next }).eq('id', id)
       await load()
+      try { window.dispatchEvent(new CustomEvent('cart-changed')) } catch {}
     } finally {
       setUpdatingId(null)
     }
@@ -117,6 +135,7 @@ export default function CartPage() {
     try {
       await supabase.from('cart_items').delete().eq('id', id)
       await load()
+      try { window.dispatchEvent(new CustomEvent('cart-changed')) } catch {}
     } finally {
       setUpdatingId(null)
     }
@@ -176,7 +195,7 @@ export default function CartPage() {
                   )}
                 </div>
                 <div className="flex-1">
-                  <div className="text-sm text-white/90">Product #{it.product_id}</div>
+                  <div className="text-sm text-white/90">{titles[it.product_id] || `Product #${it.product_id}`}</div>
                   <div className="text-xs text-white/60">Variant #{it.variant_id} · {it.color || '-'} · {it.size || '-'}</div>
                   {typeof price === 'number' && (
                     <div className="text-sm text-white/80 mt-1">Price: {price.toFixed(2)} {currency}</div>

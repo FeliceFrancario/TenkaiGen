@@ -10,6 +10,7 @@ export function AuthHeader() {
   const [open, setOpen] = useState(false)
   const supabase = createClient()
   const ref = useRef<HTMLDivElement | null>(null)
+  const [cartCount, setCartCount] = useState<number>(0)
 
   useEffect(() => {
     let mounted = true
@@ -29,6 +30,24 @@ export function AuthHeader() {
     return () => { mounted = false; sub.subscription?.unsubscribe(); document.removeEventListener('mousedown', onDoc) }
   }, [open, supabase])
 
+  useEffect(() => {
+    let mounted = true
+    const load = async () => {
+      try {
+        const { data } = await supabase.auth.getUser()
+        const uid = data.user?.id
+        if (!uid) { if (mounted) setCartCount(0); return }
+        const { count } = await supabase.from('cart_items').select('*', { count: 'exact', head: true }).eq('user_id', uid)
+        if (mounted) setCartCount(count || 0)
+      } catch {}
+    }
+    load()
+    const handler = () => load()
+    try { window.addEventListener('cart-changed', handler as any) } catch {}
+    const interval = setInterval(load, 15000)
+    return () => { mounted = false; clearInterval(interval); try { window.removeEventListener('cart-changed', handler as any) } catch {} }
+  }, [supabase])
+
   if (!user) {
     return (
       <div className="flex items-center gap-3">
@@ -44,9 +63,14 @@ export function AuthHeader() {
 
   return (
     <div className="flex items-center gap-4">
-      <Link href="/cart" className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 text-white/80 hover:bg-white/20 text-sm">
+      <Link href="/cart" className="relative inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 text-white/80 hover:bg-white/20 text-sm">
         <ShoppingCart className="w-4 h-4" />
         <span className="hidden sm:inline">Cart</span>
+        {cartCount > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-gradient-to-r from-amber-400 to-rose-500 text-black text-[11px] font-semibold grid place-items-center">
+            {cartCount}
+          </span>
+        )}
       </Link>
       <div ref={ref} className="relative">
         <button onClick={() => setOpen((o) => !o)} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 text-white/80 hover:bg-white/20 text-sm">
