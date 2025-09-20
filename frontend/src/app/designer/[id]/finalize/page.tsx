@@ -44,29 +44,7 @@ export default function FinalizePage() {
     } catch {}
   }, [productId])
 
-  // If logged in, also try server draft
-  useEffect(() => {
-    let mounted = true
-    ;(async () => {
-      try {
-        const { data } = await supabase.auth.getUser()
-        const uid = data.user?.id
-        if (!uid) return
-        const { data: rows } = await supabase
-          .from('design_drafts')
-          .select('*')
-          .eq('user_id', uid)
-          .eq('product_id', productId)
-          .order('created_at', { ascending: false })
-          .limit(1)
-        if (!mounted) return
-        if (rows && rows.length > 0) {
-          setDraft(rows[0] as any)
-        }
-      } catch {}
-    })()
-    return () => { mounted = false }
-  }, [productId, supabase])
+  // We no longer load drafts from database. Session-only.
 
   const colorEff = color || draft?.color || null
   const sizeEff = size || draft?.size || null
@@ -263,6 +241,8 @@ export default function FinalizePage() {
         quantity: 1,
         files,
         mockups,
+        prompt: draft?.prompt ?? null,
+        style: draft?.style ?? null,
       })
       router.push('/cart')
     } catch (e) {

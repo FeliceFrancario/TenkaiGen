@@ -705,7 +705,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
               <button
                 onClick={async () => {
                   try {
-                    // Persist draft to sessionStorage for finalize page
+                    // Persist draft to sessionStorage for finalize page only
                     const draft = {
                       product_id: productId,
                       color: color || null,
@@ -722,22 +722,6 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                     if (!userEmail) {
                       setShowAuthPrompt(true)
                     } else {
-                      // Best-effort server persistence
-                      try {
-                        const { data } = await supabase.auth.getUser()
-                        const userId = data.user?.id
-                        if (userId) {
-                          await supabase.from('design_drafts').upsert({
-                            user_id: userId,
-                            product_id: productId,
-                            color: draft.color,
-                            size: draft.size,
-                            designs_by_placement: draft.designs_by_placement,
-                            prompt: draft.prompt,
-                            style: draft.style,
-                          })
-                        }
-                      } catch {}
                       router.push(finalizePath)
                     }
                   } catch {}

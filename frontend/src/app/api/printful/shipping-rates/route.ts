@@ -22,19 +22,17 @@ async function pf(path: string, init?: RequestInit) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { country_code, variant_id, currency, state_code } = body || {}
-    if (!country_code || !variant_id) {
-      return NextResponse.json({ error: 'country_code and variant_id are required' }, { status: 400 })
+    const { country_code, currency, state_code } = body || {}
+    const itemsBody: Array<{ variant_id: number; quantity?: number }> = Array.isArray(body?.items) ? body.items : []
+    const singleVariantId = body?.variant_id
+    if (!country_code || (!singleVariantId && itemsBody.length === 0)) {
+      return NextResponse.json({ error: 'country_code and items (or variant_id) are required' }, { status: 400 })
     }
 
+    const items = itemsBody.length > 0 ? itemsBody : [{ variant_id: Number(singleVariantId), quantity: 1 }]
     const v1payload: any = {
       recipient: { country_code },
-      items: [
-        {
-          variant_id,
-          quantity: 1,
-        },
-      ],
+      items: items.map((it) => ({ variant_id: Number(it.variant_id), quantity: Number(it.quantity || 1) })),
       ...(currency ? { currency } : {}),
     }
     if (state_code) v1payload.recipient.state_code = state_code
