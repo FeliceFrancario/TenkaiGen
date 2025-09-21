@@ -1,7 +1,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import BackHomeBar from '@/components/back-home-bar'
-import { headers } from 'next/headers'
+import { headers, cookies } from 'next/headers'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,7 +13,7 @@ async function absoluteUrl(path: string) {
 }
 
 type PfCategory = { id: number; title: string; image_url: string | null; parent_id: number }
-type PfProduct = { id: number; title: string; main_category_id: number; thumbnail: string | null }
+type PfProduct = { id: number; title: string; main_category_id: number; thumbnail: string | null; _ships?: boolean }
 
 async function getCategories(): Promise<PfCategory[]> {
   const res = await fetch(await absoluteUrl(`/api/printful/categories`), { cache: 'no-store' })
@@ -22,15 +22,23 @@ async function getCategories(): Promise<PfCategory[]> {
   return (data?.result?.categories || []) as PfCategory[]
 }
 
-async function getProducts(categoryId: number): Promise<PfProduct[]> {
-  const res = await fetch(await absoluteUrl(`/api/printful/products?category_id=${categoryId}&limit=24`), { cache: 'no-store' })
+async function getProducts(categoryId: number, page: number, locale: string, country: string): Promise<PfProduct[]> {
+  const qs = new URLSearchParams({ category_id: String(categoryId), limit: '24', page: String(page) })
+  if (locale) qs.set('locale', locale)
+  if (country) qs.set('country_code', country)
+  const res = await fetch(await absoluteUrl(`/api/printful/products?${qs.toString()}`), { cache: 'no-store' })
   if (!res.ok) return []
   const data = await res.json()
   return (data?.result || []) as PfProduct[]
 }
 
-export default async function CatalogCategoryPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CatalogCategoryPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams?: Promise<{ page?: string, locale?: string, country?: string }> }) {
   const { id: idStr } = await params
+  const sp = (await (searchParams || Promise.resolve({}))) as any
+  const page = Math.max(1, Number(sp?.page || '1'))
+  const cookieStore = await cookies()
+  const locale = String(sp?.locale || cookieStore.get('locale')?.value || '')
+  const country = String(sp?.country || cookieStore.get('country_code')?.value || '')
   const id = Number(idStr)
   if (!id || Number.isNaN(id)) {
     return (
@@ -52,7 +60,7 @@ export default async function CatalogCategoryPage({ params }: { params: Promise<
     ancestors.unshift(cur)
     cur = byId.get(cur.parent_id) || null
   }
-  const products = children.length === 0 ? await getProducts(id) : []
+  const products = children.length === 0 ? await getProducts(id, page, locale, country) : []
 
   return (
     <main className="min-h-[60vh] px-6 py-16 max-w-6xl mx-auto text-white">
@@ -112,6 +120,9 @@ export default async function CatalogCategoryPage({ params }: { params: Promise<
                   {p.thumbnail ? (
                     <Image src={p.thumbnail} alt={p.title} fill sizes="(max-width: 768px) 50vw, 33vw" className="object-cover" />
                   ) : null}
+                  {p._ships === false && (
+                    <div className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/90 text-black text-[10px] font-semibold shadow">Not available</div>
+                  )}
                   <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(244,63,94,0.16),transparent_55%)]" />
                 </div>
                 <div className="p-3 text-center">
@@ -121,6 +132,15 @@ export default async function CatalogCategoryPage({ params }: { params: Promise<
             ))}
           </div>
         )
+      )}
+
+      {children.length === 0 && products.length === 24 && (
+        <div className="mt-6 flex justify-center gap-2">
+          {page > 1 && (
+            <Link href={`/catalog/${id}?page=${page - 1}${locale ? `&locale=${encodeURIComponent(locale)}` : ''}${country ? `&country=${encodeURIComponent(country)}` : ''}`} className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-sm">Previous</Link>
+          )}
+          <Link href={`/catalog/${id}?page=${page + 1}${locale ? `&locale=${encodeURIComponent(locale)}` : ''}${country ? `&country=${encodeURIComponent(country)}` : ''}`} className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-sm">Next</Link>
+        </div>
       )}
     </main>
   )

@@ -1,5 +1,6 @@
 import { ReactNode } from 'react'
 import { headers } from 'next/headers'
+import { ShippingCountrySelector } from '@/components/shipping-country-selector'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,8 +61,8 @@ export default async function CatalogLayout({
   }
 
   return (
-    <div className="min-h-screen grid grid-cols-1 md:grid-cols-[280px_1fr]">
-      <aside className="hidden md:block sticky top-0 h-screen p-6 bg-gradient-to-b from-amber-900/20 via-rose-900/10 to-transparent border-r border-amber-400/20">
+    <div className="min-h-screen grid grid-cols-1 md:grid-cols-[320px_1fr]">
+      <aside className="hidden md:flex sticky top-0 h-screen p-6 flex-col gap-4 bg-gradient-to-b from-amber-900/15 via-rose-900/10 to-transparent border-r border-amber-400/20">
         <div className="text-lg font-semibold bg-clip-text text-transparent bg-gradient-to-r from-amber-300 to-rose-300 drop-shadow mb-4">
           Catalog
         </div>
@@ -84,6 +85,7 @@ export default async function CatalogLayout({
             )
           })}
         </nav>
+        <ShippingCountrySelector />
       </aside>
       <section className="bg-[radial-gradient(ellipse_at_top,rgba(251,191,36,0.08),transparent_60%),radial-gradient(ellipse_at_bottom,rgba(244,63,94,0.06),transparent_60%)]">
         {children}

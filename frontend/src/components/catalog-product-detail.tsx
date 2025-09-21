@@ -44,6 +44,32 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
 
   // Pricing + shipping
   const [geoCountry, setGeoCountry] = useState<string>('US')
+  // Size guide
+  type SizeValue = { size: string; value?: string | null; min_value?: string | null; max_value?: string | null }
+  type SizeRow = { type_label: string; values: SizeValue[] }
+  type SizeTable = { type: string; unit: string; description?: string; image_url?: string; image_description?: string; measurements: SizeRow[] }
+  const [sizeTables, setSizeTables] = useState<SizeTable[] | null>(null)
+  const [sizeLoading, setSizeLoading] = useState(false)
+
+  useEffect(() => {
+    let mounted = true
+    const load = async () => {
+      setSizeLoading(true)
+      try {
+        const catalogId = (product as any).catalog_product_id || product.id
+        const r = await fetch(`/api/printful/sizes?product_id=${catalogId}`)
+        if (!r.ok) return
+        const j = await r.json()
+        const res = j?.result || {}
+        const tables: SizeTable[] = Array.isArray(res?.size_tables) ? res.size_tables : []
+        if (mounted) setSizeTables(tables)
+      } finally {
+        setSizeLoading(false)
+      }
+    }
+    load()
+    return () => { mounted = false }
+  }, [product.id])
   const [priceLabel, setPriceLabel] = useState<string>('—')
   const [priceCurrency, setPriceCurrency] = useState<string>('')
   const [shipLabel, setShipLabel] = useState<string>('—')
@@ -763,7 +789,13 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
                   <div className="text-sm text-white/80">{geoCountry}</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-base font-medium">{shippingAvailable ? (<>{shipCurrency} {shipLabel}</>) : 'Unavailable'}</div>
+                  <div className="text-base font-medium">
+                    {shippingAvailable ? (<>{shipCurrency} {shipLabel}</>) : (
+                      <span className="inline-flex items-center gap-2 text-rose-300">
+                        <span className="inline-block w-2 h-2 rounded-full bg-rose-400" /> Not available in your region
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs text-white/60">{shipEta || (shippingAvailable ? 'Shipping estimate' : 'Not shippable')}</div>
                 </div>
               </div>
@@ -771,7 +803,8 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
 
             <button
               onClick={onStartDesigning}
-              className="w-full rounded-lg px-5 py-3 bg-gradient-to-r from-amber-400 to-rose-500 text-black font-medium btn-shimmer"
+              disabled={!shippingAvailable}
+              className="w-full rounded-lg px-5 py-3 bg-gradient-to-r from-amber-400 to-rose-500 text-black font-medium btn-shimmer disabled:opacity-40 disabled:cursor-not-allowed"
             >Start designing</button>
 
             <div className="text-xs text-white/50">
@@ -779,6 +812,64 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Size guide */}
+      <div className="lg:col-span-2 mt-4">
+        <details className="rounded-xl bg-white/[0.03] border border-white/10 p-4">
+          <summary className="cursor-pointer text-sm text-white/80">Size guide</summary>
+          <div className="mt-3 space-y-4">
+            {sizeLoading && <div className="text-xs text-white/60">Loading size guide…</div>}
+            {!sizeLoading && (!sizeTables || sizeTables.length === 0) && (
+              <div className="text-xs text-white/60">Size guide not available for this product.</div>
+            )}
+            {Array.isArray(sizeTables) && sizeTables.map((tbl, idx) => (
+              <div key={idx} className="rounded-lg bg-white/[0.02] border border-white/10 p-3">
+                <div className="flex items-start gap-3">
+                  {tbl.image_url && (
+                    <div className="relative w-28 h-28 rounded-md overflow-hidden border border-white/10 flex-none">
+                      <Image src={tbl.image_url} alt={tbl.type} fill sizes="112px" className="object-contain" />
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <div className="text-sm text-white/80 capitalize">{tbl.type.replace(/_/g,' ')}</div>
+                    {tbl.description && (
+                      <div className="prose prose-invert prose-sm max-w-none text-white/70" dangerouslySetInnerHTML={{ __html: tbl.description }} />
+                    )}
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="min-w-full text-xs text-white/80 border-separate border-spacing-y-1">
+                        <thead>
+                          <tr>
+                            <th className="text-left pr-3 font-medium text-white/70">Measurement ({tbl.unit})</th>
+                            {tbl.measurements?.[0]?.values?.map((v) => (
+                              <th key={v.size} className="text-left px-2 font-medium text-white/70">{v.size}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tbl.measurements?.map((row, rIdx) => (
+                            <tr key={rIdx}>
+                              <td className="pr-3 py-1 text-white/80">{row.type_label}</td>
+                              {row.values.map((v, cIdx) => (
+                                <td key={cIdx} className="px-2 py-1">
+                                  {v.value ? (
+                                    <span>{v.value}</span>
+                                  ) : (
+                                    <span>{v.min_value ?? ''}{v.min_value && v.max_value ? '–' : ''}{v.max_value ?? ''}</span>
+                                  )}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
       </div>
     </div>
   )

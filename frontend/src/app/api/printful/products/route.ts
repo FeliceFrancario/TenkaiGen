@@ -4,11 +4,13 @@ export const runtime = 'nodejs'
 
 const PRINTFUL_API_BASE = 'https://api.printful.com'
 
-async function pf(path: string) {
+async function pf(path: string, locale?: string) {
   const token = process.env.PRINTFUL_API_TOKEN
   if (!token) throw new Error('Missing PRINTFUL_API_TOKEN')
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+  if (locale) headers['X-PF-Language'] = locale
   const res = await fetch(`${PRINTFUL_API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers,
     cache: 'no-store',
   })
   if (!res.ok) {
@@ -22,14 +24,18 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const categoryId = searchParams.get('category_id')
-    const limit = Number(searchParams.get('limit') || '8')
+    const limit = Number(searchParams.get('limit') || '24')
+    const page = Math.max(1, Number(searchParams.get('page') || '1'))
+    const offset = (page - 1) * limit
+    const locale = searchParams.get('locale') || (req.cookies.get('locale')?.value || '')
+    const countryCode = (searchParams.get('country_code') || req.cookies.get('country_code')?.value || '').toUpperCase()
 
     if (!categoryId) {
       return NextResponse.json({ error: 'category_id is required' }, { status: 400 })
     }
 
     // 1) Get catalog products by category
-    const list = await pf(`/products?category_id=${encodeURIComponent(categoryId)}&limit=${limit}`)
+    const list = await pf(`/products?category_id=${encodeURIComponent(categoryId)}&limit=${limit}&offset=${offset}&sort=bestselling`, locale)
     const products: Array<{ id: number; title: string; main_category_id: number }> = (list?.result || []).map((p: any) => ({
       id: p.id,
       title: p.title,
@@ -40,13 +46,20 @@ export async function GET(req: NextRequest) {
     const detailed = await Promise.all(
       products.map(async (p) => {
         try {
-          const detail = await pf(`/products/${p.id}`)
+          const detail = await pf(`/products/${p.id}`, locale)
           const firstVariant = (detail?.result?.variants || [])[0]
           let thumb = firstVariant?.image || null
+          // Filter embroidery/knit-only products using v1 techniques
+          try {
+            const techniques: any[] = detail?.result?.product?.techniques || []
+            const keys = techniques.map((t: any) => String(t?.key || t?.technique_key || '').toUpperCase()).filter(Boolean)
+            const isEmbOrKnitOnly = keys.length > 0 && keys.every((k: string) => k === 'EMBROIDERY' || k === 'KNITWEAR')
+            if (isEmbOrKnitOnly) return { ...p, thumbnail: null, _ships: true }
+          } catch {}
 
           // Attempt to use v2 images for better, context-aware thumbnails
           try {
-            const v2 = await pf(`/v2/catalog-products/${p.id}/images`)
+            const v2 = await pf(`/v2/catalog-products/${p.id}/images${locale ? `?locale=${encodeURIComponent(locale)}` : ''}`, locale)
             const arr: any[] = Array.isArray(v2?.data) ? v2.data : Array.isArray(v2?.result) ? v2.result : Array.isArray(v2) ? v2 : []
             type Item = { placement: string; image_url: string; background_image?: string | null; background_color?: string | null; _score?: number }
             const items: Item[] = arr.map((it: any) => ({
@@ -79,14 +92,33 @@ export async function GET(req: NextRequest) {
             if (best?.image_url) thumb = best.image_url
           } catch {}
 
-          return { ...p, thumbnail: thumb }
+          // Remove temporary placeholders
+          if (thumb && /product_temporary_image\.jpg/.test(thumb)) {
+            thumb = null
+          }
+
+          // Compute shipping availability for selected country (optional)
+          let ships = true
+          if (countryCode) {
+            try {
+              const sc = await pf(`/v2/catalog-products/${p.id}/shipping-countries`, locale)
+              const list: any[] = (sc?.data || sc?.result || sc) as any[]
+              ships = list.some((c: any) => String(c?.code || c?.country_code || '').toUpperCase() === countryCode)
+            } catch {}
+          }
+
+          return { ...p, thumbnail: thumb, _ships: ships }
         } catch (e) {
           return { ...p, thumbnail: null }
         }
       })
     )
 
-    return NextResponse.json({ result: detailed })
+    // Remove products without usable thumbnails
+    const withThumb = detailed.filter((d) => !!(d as any).thumbnail)
+    // Sort to place non-shippable items last if country provided
+    const sorted = countryCode ? (withThumb as any[]).sort((a, b) => Number(a._ships === false) - Number(b._ships === false)) : withThumb
+    return NextResponse.json({ result: sorted, page, limit })
   } catch (e: any) {
     console.error('[api/printful/products] error', e)
     return NextResponse.json({ error: e?.message || 'Internal error' }, { status: 500 })

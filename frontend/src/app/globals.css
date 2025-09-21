@@ -2,6 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import flag-icons CSS */
+@import 'flag-icons/css/flag-icons.min.css';
+
+/* Dark theme dropdown styling */
+.dark-dropdown {
+  background-color: rgba(0, 0, 0, 0.8) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+}
+
+.dark-dropdown option {
+  background-color: rgba(0, 0, 0, 0.9) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.dark-dropdown:hover {
+  background-color: rgba(0, 0, 0, 0.9) !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+}
+
+.dark-dropdown:focus {
+  background-color: rgba(0, 0, 0, 0.9) !important;
+  border-color: rgba(212, 175, 55, 0.5) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.3) !important;
+}
+
 @layer base {
   :root {
     --background: 240 10% 3.9%;

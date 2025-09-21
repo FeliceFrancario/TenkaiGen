@@ -1,15 +1,18 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
 
 const PRINTFUL_API_BASE = 'https://api.printful.com'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const token = process.env.PRINTFUL_API_TOKEN
     if (!token) throw new Error('Missing PRINTFUL_API_TOKEN')
+    const locale = req.headers.get('x-pf-language') || (req.cookies.get('locale')?.value || '')
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+    if (locale) headers['X-PF-Language'] = locale
     const res = await fetch(`${PRINTFUL_API_BASE}/categories`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
       cache: 'no-store',
     })
     if (!res.ok) {
