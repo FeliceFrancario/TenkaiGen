@@ -28,20 +28,56 @@ export async function GET(req: NextRequest) {
     const page = Math.max(1, Number(searchParams.get('page') || '1'))
     const locale = searchParams.get('locale') || (req.cookies.get('locale')?.value || '')
     const countryCode = (searchParams.get('country_code') || req.cookies.get('country_code')?.value || '').toUpperCase()
+    const sortType = searchParams.get('sort') || 'bestseller'
+    
+    console.log('🔍 API received sortType:', sortType, 'categoryId:', categoryId)
 
     if (!categoryId) {
       return NextResponse.json({ error: 'category_id is required' }, { status: 400 })
     }
 
-    // 1) Get ALL products for the category (no pagination at API level)
-    // We'll fetch a larger batch to account for filtering
+    // 1) Get products using v2 API with proper sorting
     const batchSize = Math.max(100, limit * 3) // Fetch 3x the requested amount to account for filtering
-    const list = await pf(`/products?category_id=${encodeURIComponent(categoryId)}&limit=${batchSize}&sort=bestselling`, locale)
-    const allProducts: Array<{ id: number; title: string; main_category_id: number }> = (list?.result || []).map((p: any) => ({
-      id: p.id,
-      title: p.title,
-      main_category_id: p.main_category_id,
-    }))
+    
+    // Map sort types to v2 API parameters
+    let sortDirection = 'ascending' // Default to ascending for bestseller
+    if (sortType === 'price') {
+      sortDirection = 'ascending' // Price should be ascending (cheapest first)
+    } else if (sortType === 'new') {
+      sortDirection = 'descending' // Newest first
+    } else if (sortType === 'rating') {
+      sortDirection = 'descending' // Highest rated first
+    } else if (sortType === 'bestseller') {
+      sortDirection = 'ascending' // Bestseller ascending (as confirmed in Postman)
+    }
+    
+    let allProducts: Array<{ id: number; title: string; main_category_id: number }> = []
+    let usedV2 = false
+    
+    try {
+      // Use v2 API with proper sorting and category filtering
+      const v2Url = `/v2/catalog-products?category_ids=${encodeURIComponent(categoryId)}&limit=${batchSize}&sort_type=${sortType}&sort_direction=${sortDirection}`
+      const v2Response = await pf(v2Url, locale)
+      
+      if (v2Response?.data) {
+        allProducts = (v2Response.data || []).map((p: any) => ({
+          id: p.id,
+          title: p.name || p.title, // v2 uses 'name' instead of 'title'
+          main_category_id: p.main_category_id,
+        }))
+        usedV2 = true
+      }
+    } catch (v2Error) {
+      console.log('v2 API failed, falling back to v1:', v2Error)
+      // Fallback to v1 API without sorting
+      const v1Response = await pf(`/products?category_id=${encodeURIComponent(categoryId)}&limit=${batchSize}`, locale)
+      allProducts = (v1Response?.result || []).map((p: any) => ({
+        id: p.id,
+        title: p.title,
+        main_category_id: p.main_category_id,
+      }))
+      usedV2 = false
+    }
 
     // 2) Process products in batches to avoid overwhelming the API
     const batchLimit = 10 // Process 10 products at a time
@@ -134,18 +170,45 @@ export async function GET(req: NextRequest) {
       if (processedProducts.length >= page * limit) break
     }
 
-    // 3) Sort to place non-shippable items last if country provided
-    const sorted = countryCode ? processedProducts.sort((a, b) => Number(a._ships === false) - Number(b._ships === false)) : processedProducts
+    // 3) Apply client-side sorting if v1 API was used (v2 API already sorts server-side)
+    let sorted = [...processedProducts]
+    
+    if (!usedV2) {
+      // Client-side sorting for v1 API fallback
+      switch (sortType) {
+        case 'price':
+          // Sort by title as a fallback (no price data available)
+          sorted = sorted.sort((a, b) => a.title.localeCompare(b.title))
+          break
+        case 'new':
+          // Sort by ID (newer products typically have higher IDs)
+          sorted = sorted.sort((a, b) => b.id - a.id)
+          break
+        case 'rating':
+          // Sort by title as a fallback (no rating data available)
+          sorted = sorted.sort((a, b) => a.title.localeCompare(b.title))
+          break
+        case 'bestseller':
+        default:
+          // Keep original order for bestseller
+          break
+      }
+    }
+    
+    // 4) Sort to place non-shippable items last if country provided
+    if (countryCode) {
+      sorted = sorted.sort((a, b) => Number(a._ships === false) - Number(b._ships === false))
+    }
 
-    // 4) Apply pagination to the filtered results
+    // 5) Apply pagination to the filtered results
     const offset = (page - 1) * limit
     const paginatedResults = sorted.slice(offset, offset + limit)
     
-    // 5) Estimate total filtered products based on filtering ratio
+    // 6) Estimate total filtered products based on filtering ratio
     const filteringRatio = processedProducts.length / processedCount
     const estimatedTotal = Math.round(allProducts.length * filteringRatio)
     
-    // 6) Check if there are more pages
+    // 7) Check if there are more pages
     const hasMore = estimatedTotal > offset + limit
 
     return NextResponse.json({ 

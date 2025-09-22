@@ -1,6 +1,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import BackHomeBar from '@/components/back-home-bar'
+import { SortingSelector } from '@/components/sorting-selector'
 import { headers, cookies } from 'next/headers'
 
 export const dynamic = 'force-dynamic'
@@ -22,10 +23,11 @@ async function getCategories(): Promise<PfCategory[]> {
   return (data?.result?.categories || []) as PfCategory[]
 }
 
-async function getProducts(categoryId: number, page: number, locale: string, country: string): Promise<{ products: PfProduct[], hasMore: boolean, total: number }> {
+async function getProducts(categoryId: number, page: number, locale: string, country: string, sort: string): Promise<{ products: PfProduct[], hasMore: boolean, total: number }> {
   const qs = new URLSearchParams({ category_id: String(categoryId), limit: '24', page: String(page) })
   if (locale) qs.set('locale', locale)
   if (country) qs.set('country_code', country)
+  if (sort) qs.set('sort', sort)
   const res = await fetch(await absoluteUrl(`/api/printful/products?${qs.toString()}`), { cache: 'no-store' })
   if (!res.ok) return { products: [], hasMore: false, total: 0 }
   const data = await res.json()
@@ -36,14 +38,18 @@ async function getProducts(categoryId: number, page: number, locale: string, cou
   }
 }
 
-export default async function CatalogCategoryPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams?: Promise<{ page?: string, locale?: string, country?: string }> }) {
+export default async function CatalogCategoryPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams?: Promise<{ page?: string, locale?: string, country?: string, sort?: string }> }) {
   const { id: idStr } = await params
   const sp = (await (searchParams || Promise.resolve({}))) as any
   const page = Math.max(1, Number(sp?.page || '1'))
   const cookieStore = await cookies()
   const locale = String(sp?.locale || cookieStore.get('locale')?.value || '')
   const country = String(sp?.country || cookieStore.get('country_code')?.value || '')
+  const sort = String(sp?.sort || 'bestseller')
   const id = Number(idStr)
+  
+  console.log('📄 Catalog page received sort:', sort, 'from searchParams:', sp)
+  
   if (!id || Number.isNaN(id)) {
     return (
       <main className="min-h-[60vh] px-6 py-16 max-w-5xl mx-auto text-white">
@@ -64,7 +70,7 @@ export default async function CatalogCategoryPage({ params, searchParams }: { pa
     ancestors.unshift(cur)
     cur = byId.get(cur.parent_id) || null
   }
-  const productData = children.length === 0 ? await getProducts(id, page, locale, country) : { products: [], hasMore: false, total: 0 }
+  const productData = children.length === 0 ? await getProducts(id, page, locale, country, sort) : { products: [], hasMore: false, total: 0 }
   const { products, hasMore, total } = productData
 
   return (
@@ -114,38 +120,43 @@ export default async function CatalogCategoryPage({ params, searchParams }: { pa
         products.length === 0 ? (
           <p className="text-white/60">No products found for this category.</p>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {products.map((p) => (
-              <Link
-                key={p.id}
-                href={`/catalog/product/${p.id}`}
-                className="group rounded-2xl overflow-hidden border border-amber-400/25 bg-white/[0.035] transition hover:border-amber-400/60 hover:shadow-[0_18px_50px_rgba(244,63,94,0.22),0_10px_24px_rgba(212,175,55,0.18)] hover:translate-y-[-2px] active:translate-y-0"
-              >
-                <div className="relative aspect-square bg-white/5">
-                  {p.thumbnail ? (
-                    <Image src={p.thumbnail} alt={p.title} fill sizes="(max-width: 768px) 50vw, 33vw" className="object-cover" />
-                  ) : null}
-                  {p._ships === false && (
-                    <div className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/90 text-black text-[10px] font-semibold shadow">Not available</div>
-                  )}
-                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(244,63,94,0.16),transparent_55%)]" />
-                </div>
-                <div className="p-3 text-center">
-                  <div className="font-medium text-sm text-amber-200">{p.title}</div>
-                </div>
-              </Link>
-            ))}
-          </div>
+          <>
+            <div className="flex justify-end mb-6">
+              <SortingSelector />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {products.map((p) => (
+                <Link
+                  key={p.id}
+                  href={`/catalog/product/${p.id}`}
+                  className="group rounded-2xl overflow-hidden border border-amber-400/25 bg-white/[0.035] transition hover:border-amber-400/60 hover:shadow-[0_18px_50px_rgba(244,63,94,0.22),0_10px_24px_rgba(212,175,55,0.18)] hover:translate-y-[-2px] active:translate-y-0"
+                >
+                  <div className="relative aspect-square bg-white/5">
+                    {p.thumbnail ? (
+                      <Image src={p.thumbnail} alt={p.title} fill sizes="(max-width: 768px) 50vw, 33vw" className="object-cover" />
+                    ) : null}
+                    {p._ships === false && (
+                      <div className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/90 text-black text-[10px] font-semibold shadow">Not available</div>
+                    )}
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(244,63,94,0.16),transparent_55%)]" />
+                  </div>
+                  <div className="p-3 text-center">
+                    <div className="font-medium text-sm text-amber-200">{p.title}</div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </>
         )
       )}
 
       {children.length === 0 && (hasMore || page > 1) && (
         <div className="mt-6 flex justify-center gap-2">
           {page > 1 && (
-            <Link href={`/catalog/${id}?page=${page - 1}${locale ? `&locale=${encodeURIComponent(locale)}` : ''}${country ? `&country=${encodeURIComponent(country)}` : ''}`} className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-sm hover:bg-white/[0.1] transition-colors">Previous</Link>
+            <Link href={`/catalog/${id}?page=${page - 1}${locale ? `&locale=${encodeURIComponent(locale)}` : ''}${country ? `&country=${encodeURIComponent(country)}` : ''}${sort ? `&sort=${encodeURIComponent(sort)}` : ''}`} className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-sm hover:bg-white/[0.1] transition-colors">Previous</Link>
           )}
           {hasMore && (
-            <Link href={`/catalog/${id}?page=${page + 1}${locale ? `&locale=${encodeURIComponent(locale)}` : ''}${country ? `&country=${encodeURIComponent(country)}` : ''}`} className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-sm hover:bg-white/[0.1] transition-colors">Next</Link>
+            <Link href={`/catalog/${id}?page=${page + 1}${locale ? `&locale=${encodeURIComponent(locale)}` : ''}${country ? `&country=${encodeURIComponent(country)}` : ''}${sort ? `&sort=${encodeURIComponent(sort)}` : ''}`} className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-sm hover:bg-white/[0.1] transition-colors">Next</Link>
           )}
         </div>
       )}
