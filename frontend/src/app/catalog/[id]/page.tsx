@@ -22,14 +22,18 @@ async function getCategories(): Promise<PfCategory[]> {
   return (data?.result?.categories || []) as PfCategory[]
 }
 
-async function getProducts(categoryId: number, page: number, locale: string, country: string): Promise<PfProduct[]> {
+async function getProducts(categoryId: number, page: number, locale: string, country: string): Promise<{ products: PfProduct[], hasMore: boolean, total: number }> {
   const qs = new URLSearchParams({ category_id: String(categoryId), limit: '24', page: String(page) })
   if (locale) qs.set('locale', locale)
   if (country) qs.set('country_code', country)
   const res = await fetch(await absoluteUrl(`/api/printful/products?${qs.toString()}`), { cache: 'no-store' })
-  if (!res.ok) return []
+  if (!res.ok) return { products: [], hasMore: false, total: 0 }
   const data = await res.json()
-  return (data?.result || []) as PfProduct[]
+  return {
+    products: (data?.result || []) as PfProduct[],
+    hasMore: data?.hasMore || false,
+    total: data?.total || 0
+  }
 }
 
 export default async function CatalogCategoryPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams?: Promise<{ page?: string, locale?: string, country?: string }> }) {
@@ -60,7 +64,8 @@ export default async function CatalogCategoryPage({ params, searchParams }: { pa
     ancestors.unshift(cur)
     cur = byId.get(cur.parent_id) || null
   }
-  const products = children.length === 0 ? await getProducts(id, page, locale, country) : []
+  const productData = children.length === 0 ? await getProducts(id, page, locale, country) : { products: [], hasMore: false, total: 0 }
+  const { products, hasMore, total } = productData
 
   return (
     <main className="min-h-[60vh] px-6 py-16 max-w-6xl mx-auto text-white">
@@ -134,12 +139,20 @@ export default async function CatalogCategoryPage({ params, searchParams }: { pa
         )
       )}
 
-      {children.length === 0 && products.length === 24 && (
+      {children.length === 0 && (hasMore || page > 1) && (
         <div className="mt-6 flex justify-center gap-2">
           {page > 1 && (
-            <Link href={`/catalog/${id}?page=${page - 1}${locale ? `&locale=${encodeURIComponent(locale)}` : ''}${country ? `&country=${encodeURIComponent(country)}` : ''}`} className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-sm">Previous</Link>
+            <Link href={`/catalog/${id}?page=${page - 1}${locale ? `&locale=${encodeURIComponent(locale)}` : ''}${country ? `&country=${encodeURIComponent(country)}` : ''}`} className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-sm hover:bg-white/[0.1] transition-colors">Previous</Link>
           )}
-          <Link href={`/catalog/${id}?page=${page + 1}${locale ? `&locale=${encodeURIComponent(locale)}` : ''}${country ? `&country=${encodeURIComponent(country)}` : ''}`} className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-sm">Next</Link>
+          {hasMore && (
+            <Link href={`/catalog/${id}?page=${page + 1}${locale ? `&locale=${encodeURIComponent(locale)}` : ''}${country ? `&country=${encodeURIComponent(country)}` : ''}`} className="px-3 py-1.5 rounded-md border border-white/10 bg-white/[0.06] text-sm hover:bg-white/[0.1] transition-colors">Next</Link>
+          )}
+        </div>
+      )}
+      
+      {children.length === 0 && total > 0 && (
+        <div className="mt-4 text-center text-sm text-white/60">
+          Showing {Math.min((page - 1) * 24 + 1, total)}-{Math.min(page * 24, total)} of {total} products
         </div>
       )}
     </main>
