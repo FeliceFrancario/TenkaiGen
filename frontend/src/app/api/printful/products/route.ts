@@ -29,8 +29,6 @@ export async function GET(req: NextRequest) {
     const locale = searchParams.get('locale') || (req.cookies.get('locale')?.value || '')
     const countryCode = (searchParams.get('country_code') || req.cookies.get('country_code')?.value || '').toUpperCase()
     const sortType = searchParams.get('sort') || 'bestseller'
-    
-    console.log('🔍 API received sortType:', sortType, 'categoryId:', categoryId)
 
     if (!categoryId) {
       return NextResponse.json({ error: 'category_id is required' }, { status: 400 })
@@ -154,7 +152,25 @@ export async function GET(req: NextRequest) {
               } catch {}
             }
 
-            return { ...p, thumbnail: thumb, _ships: ships }
+            // Fetch actual product price from variants with correct currency for country
+            let price = null
+            let currency = 'USD'
+            try {
+              // Use country-specific pricing if available
+              const priceUrl = countryCode 
+                ? `/v2/catalog-products/${p.id}/prices?destination_country=${countryCode}`
+                : `/v2/catalog-products/${p.id}/prices`
+              const priceData = await pf(priceUrl, locale)
+              
+              if (priceData?.data?.variants?.[0]?.techniques?.[0]) {
+                const variant = priceData.data.variants[0]
+                const technique = variant.techniques[0]
+                price = technique.discounted_price || technique.price
+                currency = priceData.data.currency || 'USD'
+              }
+            } catch {}
+
+            return { ...p, thumbnail: thumb, _ships: ships, price, currency }
           } catch (e) {
             return null // Skip failed products
           }
@@ -170,16 +186,19 @@ export async function GET(req: NextRequest) {
       if (processedProducts.length >= page * limit) break
     }
 
-    // 3) Apply client-side sorting if v1 API was used (v2 API already sorts server-side)
+    // 3) Apply client-side sorting for price (v2 API price sorting may not work correctly)
     let sorted = [...processedProducts]
     
-    if (!usedV2) {
-      // Client-side sorting for v1 API fallback
+    // Always apply client-side price sorting since v2 API price sorting may not work correctly
+    if (sortType === 'price') {
+      sorted = sorted.sort((a, b) => {
+        const aPrice = a.price ? parseFloat(a.price) : Infinity
+        const bPrice = b.price ? parseFloat(b.price) : Infinity
+        return aPrice - bPrice
+      })
+    } else if (!usedV2) {
+      // Client-side sorting for v1 API fallback for other sort types
       switch (sortType) {
-        case 'price':
-          // Sort by title as a fallback (no price data available)
-          sorted = sorted.sort((a, b) => a.title.localeCompare(b.title))
-          break
         case 'new':
           // Sort by ID (newer products typically have higher IDs)
           sorted = sorted.sort((a, b) => b.id - a.id)
@@ -196,8 +215,17 @@ export async function GET(req: NextRequest) {
     }
     
     // 4) Sort to place non-shippable items last if country provided
+    // This should be the final sort to ensure shipping availability is respected
     if (countryCode) {
-      sorted = sorted.sort((a, b) => Number(a._ships === false) - Number(b._ships === false))
+      sorted = sorted.sort((a, b) => {
+        // First sort by shipping availability (shippable first)
+        const aShips = a._ships === true ? 0 : 1
+        const bShips = b._ships === true ? 0 : 1
+        if (aShips !== bShips) return aShips - bShips
+        
+        // If both have same shipping status, maintain the original sort order
+        return 0
+      })
     }
 
     // 5) Apply pagination to the filtered results

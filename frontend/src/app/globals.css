@@ -175,3 +175,11 @@
 .glow-gold { box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.25), 0 10px 30px rgba(212, 175, 55, 0.18); }
 .glow-crimson { box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.25), 0 10px 30px rgba(220, 38, 38, 0.18); }
 .float-soft { animation: floatSoft 6s ease-in-out infinite; }
+
+/* Line clamp utility */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

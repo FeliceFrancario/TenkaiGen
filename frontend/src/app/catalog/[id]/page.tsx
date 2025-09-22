@@ -2,6 +2,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import BackHomeBar from '@/components/back-home-bar'
 import { SortingSelector } from '@/components/sorting-selector'
+import { ProductGrid } from '@/components/product-grid'
 import { headers, cookies } from 'next/headers'
 
 export const dynamic = 'force-dynamic'
@@ -14,7 +15,7 @@ async function absoluteUrl(path: string) {
 }
 
 type PfCategory = { id: number; title: string; image_url: string | null; parent_id: number }
-type PfProduct = { id: number; title: string; main_category_id: number; thumbnail: string | null; _ships?: boolean }
+type PfProduct = { id: number; title: string; main_category_id: number; thumbnail: string | null; _ships?: boolean; price?: string | null; currency?: string }
 
 async function getCategories(): Promise<PfCategory[]> {
   const res = await fetch(await absoluteUrl(`/api/printful/categories`), { cache: 'no-store' })
@@ -47,8 +48,6 @@ export default async function CatalogCategoryPage({ params, searchParams }: { pa
   const country = String(sp?.country || cookieStore.get('country_code')?.value || '')
   const sort = String(sp?.sort || 'bestseller')
   const id = Number(idStr)
-  
-  console.log('📄 Catalog page received sort:', sort, 'from searchParams:', sp)
   
   if (!id || Number.isNaN(id)) {
     return (
@@ -124,28 +123,7 @@ export default async function CatalogCategoryPage({ params, searchParams }: { pa
             <div className="flex justify-end mb-6">
               <SortingSelector />
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-              {products.map((p) => (
-                <Link
-                  key={p.id}
-                  href={`/catalog/product/${p.id}`}
-                  className="group rounded-2xl overflow-hidden border border-amber-400/25 bg-white/[0.035] transition hover:border-amber-400/60 hover:shadow-[0_18px_50px_rgba(244,63,94,0.22),0_10px_24px_rgba(212,175,55,0.18)] hover:translate-y-[-2px] active:translate-y-0"
-                >
-                  <div className="relative aspect-square bg-white/5">
-                    {p.thumbnail ? (
-                      <Image src={p.thumbnail} alt={p.title} fill sizes="(max-width: 768px) 50vw, 33vw" className="object-cover" />
-                    ) : null}
-                    {p._ships === false && (
-                      <div className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/90 text-black text-[10px] font-semibold shadow">Not available</div>
-                    )}
-                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(244,63,94,0.16),transparent_55%)]" />
-                  </div>
-                  <div className="p-3 text-center">
-                    <div className="font-medium text-sm text-amber-200">{p.title}</div>
-                  </div>
-                </Link>
-              ))}
-            </div>
+            <ProductGrid products={products} />
           </>
         )
       )}
