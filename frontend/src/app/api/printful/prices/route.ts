@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     if (currency) qs.set('currency', currency)
     if (sellingRegion) qs.set('selling_region', sellingRegion)
 
-    // Try v2 prices first
+    // Try v2 prices first with currency parameter
     try {
       const url = `/v2/catalog-products/${encodeURIComponent(productId)}/prices${qs.toString() ? `?${qs.toString()}` : ''}`
       const data = await pf(url)

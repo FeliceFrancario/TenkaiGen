@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createServiceClient } from '@/lib/database'
 
 export const runtime = 'nodejs'
 
@@ -34,6 +35,28 @@ export async function GET(req: NextRequest) {
       || (variants?.[0] as any)?.product?.product_id
       || (variants?.[0] as any)?.product?.id
       || null
+
+    // Fetch v2 catalog variant IDs for shipping
+    let v2Variants: any[] = []
+    if (catalogProductId) {
+      try {
+        const v2data = await pf(`/v2/catalog-products/${catalogProductId}/catalog-variants`)
+        v2Variants = (v2data?.data || []) as any[]
+      } catch {}
+    }
+
+    // Try to find DB product id by v2 catalog printful_id
+    let _db_id: string | null = null
+    try {
+      const supabase = await createServiceClient()
+      const { data } = await supabase
+        .from('products')
+        .select('id')
+        .eq('printful_id', catalogProductId)
+        .limit(1)
+      _db_id = data?.[0]?.id || null
+    } catch {}
+
     const normalized = {
       id: product.id,
       catalog_product_id: catalogProductId,
@@ -43,21 +66,30 @@ export async function GET(req: NextRequest) {
       model: product.model || null,
       // Include main_category_id for breadcrumb construction on product page
       main_category_id: product.main_category_id || (result as any)?.main_category_id || null,
+      _db_id,
       sizes: (product.sizes || []).map((s: any) => (typeof s === 'string' ? s : s?.size || s)).filter(Boolean),
       colors: (product.colors || []).map((c: any) => ({
         name: c?.name || c?.title || String(c || ''),
         value: c?.value || c?.code || null,
       })),
-      variants: variants.map((v: any) => ({
-        id: v.id,
-        name: v.name || v.title || '',
-        size: v.size || v.size_code || null,
-        color: v.color || v.color_name || null,
-        color_code: v.color_code || v.color_hex || null,
-        image: v.image || v.files?.[0]?.preview_url || null,
-        price: v.price ?? v.retail_price ?? null,
-        currency: (result as any)?.currency || null,
-      })),
+      variants: variants.map((v: any) => {
+        // Try to match v2 catalog variant by size/color
+        const v2match = v2Variants.find((v2: any) => 
+          String(v2?.size || '').toLowerCase() === String(v?.size || v?.size_code || '').toLowerCase() &&
+          String(v2?.color || '').toLowerCase() === String(v?.color || v?.color_name || '').toLowerCase()
+        )
+        return {
+          id: v.id,
+          catalog_variant_id: v2match?.id || null,
+          name: v.name || v.title || '',
+          size: v.size || v.size_code || null,
+          color: v.color || v.color_name || null,
+          color_code: v.color_code || v.color_hex || null,
+          image: v.image || v.files?.[0]?.preview_url || null,
+          price: v.price ?? v.retail_price ?? null,
+          currency: (result as any)?.currency || null,
+        }
+      }),
       image: product.image || null,
     }
 

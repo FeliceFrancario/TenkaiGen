@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { ProductGridSkeleton } from './product-skeleton'
+import { useEffect, useState } from 'react'
 
 type PfProduct = { 
   id: number; 
@@ -17,9 +18,10 @@ type PfProduct = {
 interface ProductGridProps {
   products: PfProduct[]
   isLoading?: boolean
+  fromCategoryId?: number
 }
 
-export function ProductGrid({ products, isLoading = false }: ProductGridProps) {
+export function ProductGrid({ products, isLoading = false, fromCategoryId }: ProductGridProps) {
   if (isLoading) {
     return <ProductGridSkeleton />
   }
@@ -29,7 +31,7 @@ export function ProductGrid({ products, isLoading = false }: ProductGridProps) {
       {products.map((p) => (
         <Link
           key={p.id}
-          href={`/catalog/product/${p.id}`}
+          href={`/catalog/product/${p.id}${fromCategoryId ? `?from_category=${fromCategoryId}` : ''}`}
           className="group rounded-2xl overflow-hidden border border-amber-400/25 bg-white/[0.035] transition hover:border-amber-400/60 hover:shadow-[0_18px_50px_rgba(244,63,94,0.22),0_10px_24px_rgba(212,175,55,0.18)] hover:translate-y-[-2px] active:translate-y-0"
         >
           <div className="relative aspect-square bg-white/5">
@@ -47,16 +49,8 @@ export function ProductGrid({ products, isLoading = false }: ProductGridProps) {
               </div>
             )}
             
-            {/* Price badge */}
-            {p.price && (
-              <div className="absolute top-2 right-2 inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-500/95 to-yellow-500/95 text-black text-[11px] font-bold shadow-lg border border-amber-400/50 backdrop-blur-sm">
-                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd" />
-                </svg>
-                {p.currency} {p.price}
-              </div>
-            )}
+            {/* Price badge - always ensure DB selling price */}
+            <PriceBadge product={p} />
             
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(244,63,94,0.16),transparent_55%)]" />
           </div>
@@ -65,6 +59,75 @@ export function ProductGrid({ products, isLoading = false }: ProductGridProps) {
           </div>
         </Link>
       ))}
+    </div>
+  )
+}
+
+function PriceBadge({ product }: { product: any }) {
+  const [price, setPrice] = useState<string | null>(null)
+  const [currency, setCurrency] = useState<string>('')
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        // Determine desired currency/region from cookie or navigator
+        let cc = 'US'
+        try {
+          const all = typeof document !== 'undefined' ? document.cookie || '' : ''
+          const m = /(?:^|; )country_code=([^;]+)/.exec(all)
+          if (m && m[1]) cc = decodeURIComponent(m[1]).toUpperCase()
+        } catch {}
+        if (!cc && typeof navigator !== 'undefined' && navigator.language) {
+          const lang = navigator.language
+          const mm = /-([A-Z]{2})$/i.exec(lang)
+          if (mm && mm[1]) cc = mm[1].toUpperCase()
+        }
+        const eur = new Set(['IT','FR','DE','ES','NL','BE','PT','IE','FI','AT','GR','EE','LV','LT','LU','MT','SI','SK','CY'])
+        const desiredCurrency = cc === 'GB' || cc === 'UK' ? 'GBP' : eur.has(cc) ? 'EUR' : 'USD'
+        const region = eur.has(cc) || cc === 'GB' || cc === 'UK' ? 'eu' : 'us'
+
+        // Resolve DB id (if not present)
+        let dbId = (product as any)._db_id
+        if (!dbId) {
+          const pfId = typeof product.id === 'number' ? product.id : undefined
+          if (pfId != null) {
+            const r = await fetch(`/api/db/products?printful_id=${pfId}&limit=1`)
+            if (r.ok) {
+              const j = await r.json()
+              const first = Array.isArray(j?.result) ? j.result[0] : null
+              if (first?.id) dbId = first.id
+            }
+          }
+        }
+        if (!dbId) {
+          // If we still don't have DB id, hide price rather than show Printful
+          if (mounted) { setPrice(null); setCurrency('') }
+          return
+        }
+        const pr = await fetch(`/api/db/price?product_id=${encodeURIComponent(dbId)}&currency=${desiredCurrency}&region=${region}`)
+        if (pr.ok) {
+          const pj = await pr.json()
+          const payload = pj?.result
+          if (payload?.price != null && mounted) {
+            setPrice(Number(payload.price).toFixed(2))
+            setCurrency(payload.currency || desiredCurrency)
+          }
+        }
+      } catch {}
+    })()
+    return () => { mounted = false }
+  }, [product?.id])
+
+  if (!price) return null
+  return (
+    <div className="absolute top-2 right-2 inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-500/95 to-yellow-500/95 text-black text-[11px] font-bold shadow-lg border border-amber-400/50 backdrop-blur-sm">
+      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+        <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
+        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd" />
+      </svg>
+      {currency} {price}
+      <span className="ml-1 text-[10px] font-semibold opacity-90">incl. design</span>
     </div>
   )
 }

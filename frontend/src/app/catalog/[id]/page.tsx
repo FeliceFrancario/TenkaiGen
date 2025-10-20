@@ -2,8 +2,10 @@ import Image from 'next/image'
 import Link from 'next/link'
 import BackHomeBar from '@/components/back-home-bar'
 import { SortingSelector } from '@/components/sorting-selector'
-import { ProductGrid } from '@/components/product-grid'
+import { Suspense } from 'react'
+import { CatalogProductsClient } from '@/components/catalog-products-client'
 import { headers, cookies } from 'next/headers'
+import { getCategoryGender } from '@/lib/category-utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +27,42 @@ async function getCategories(): Promise<PfCategory[]> {
 }
 
 async function getProducts(categoryId: number, page: number, locale: string, country: string, sort: string): Promise<{ products: PfProduct[], hasMore: boolean, total: number }> {
+  try {
+    // Try database first (fast!)
+    const qs = new URLSearchParams({ 
+      category_id: String(categoryId), 
+      limit: '24', 
+      offset: String((page - 1) * 24),
+      currency: 'USD'
+    })
+    if (sort) qs.set('sort', sort)
+    
+    const res = await fetch(await absoluteUrl(`/api/db/products?${qs.toString()}`), { cache: 'no-store' })
+    if (res.ok) {
+      const data = await res.json()
+      const rows: any[] = Array.isArray(data?.result) ? data.result : []
+      if (data.success && rows.length > 0) {
+        // Transform database products to match expected format
+        return {
+          products: rows.map((p: any) => ({
+            id: parseInt(p.id.replace(/-/g, '').substring(0, 8), 16), // Convert UUID to number
+            title: p.title,
+            main_category_id: parseInt(p.main_category_id.replace(/-/g, '').substring(0, 8), 16),
+            thumbnail: p.thumbnail,
+            _ships: p._ships,
+            price: p.price,
+            currency: p.currency
+          })),
+          hasMore: data.hasMore || false,
+          total: data.total || 0
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('Database products failed, falling back to API:', error)
+  }
+  
+  // Fallback to Printful API
   const qs = new URLSearchParams({ category_id: String(categoryId), limit: '24', page: String(page) })
   if (locale) qs.set('locale', locale)
   if (country) qs.set('country_code', country)
@@ -69,8 +107,11 @@ export default async function CatalogCategoryPage({ params, searchParams }: { pa
     ancestors.unshift(cur)
     cur = byId.get(cur.parent_id) || null
   }
-  const productData = children.length === 0 ? await getProducts(id, page, locale, country, sort) : { products: [], hasMore: false, total: 0 }
+  const productData = children.length === 0 ? { products: [], hasMore: false, total: 0 } : { products: [], hasMore: false, total: 0 }
   const { products, hasMore, total } = productData
+  
+  // Determine gender context for image filtering
+  const gender = getCategoryGender(id, cats)
 
   return (
     <main className="min-h-[60vh] px-6 py-16 max-w-6xl mx-auto text-white">
@@ -116,16 +157,12 @@ export default async function CatalogCategoryPage({ params, searchParams }: { pa
       )}
 
       {children.length === 0 && (
-        products.length === 0 ? (
-          <p className="text-white/60">No products found for this category.</p>
-        ) : (
-          <>
-            <div className="flex justify-end mb-6">
-              <SortingSelector />
-            </div>
-            <ProductGrid products={products} />
-          </>
-        )
+        <>
+          <div className="flex justify-end mb-6">
+            <SortingSelector />
+          </div>
+          <CatalogProductsClient categoryId={id} page={page} locale={locale} country={country} sort={sort} gender={gender} />
+        </>
       )}
 
       {children.length === 0 && (hasMore || page > 1) && (

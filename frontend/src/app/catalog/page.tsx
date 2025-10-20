@@ -26,6 +26,26 @@ async function absoluteUrl(path: string) {
 }
 
 async function getCategories(): Promise<PfCategory[]> {
+  try {
+    // Try database first (fast!)
+    const res = await fetch(await absoluteUrl('/api/db/categories'), { cache: 'no-store' })
+    if (res.ok) {
+      const data = await res.json()
+      if (data.success && data.result?.categories?.length > 0) {
+        // Transform database categories to match expected format
+        return data.result.categories.map((cat: any) => ({
+          id: parseInt(cat.id.replace(/-/g, '').substring(0, 8), 16), // Convert UUID to number
+          title: cat.title,
+          image_url: cat.image_url,
+          parent_id: cat.parent_id ? parseInt(cat.parent_id.replace(/-/g, '').substring(0, 8), 16) : 0
+        }))
+      }
+    }
+  } catch (error) {
+    console.warn('Database categories failed, falling back to API:', error)
+  }
+  
+  // Fallback to Printful API
   const res = await fetch(await absoluteUrl('/api/printful/categories'), { cache: 'no-store' })
   if (!res.ok) return []
   const data = await res.json()

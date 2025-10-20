@@ -1,10 +1,116 @@
 'use client'
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import Image from 'next/image'
 import { STYLES } from '@/lib/styles'
 import { useFlow } from '@/components/flow-provider'
 import { useRouter } from 'next/navigation'
+
+// Country list with flags
+const COUNTRIES = [
+  { code: 'US', name: 'United States', flag: 'us', needsState: true },
+  { code: 'CA', name: 'Canada', flag: 'ca', needsState: true },
+  { code: 'AU', name: 'Australia', flag: 'au', needsState: true },
+  { code: 'GB', name: 'United Kingdom', flag: 'gb' },
+  { code: 'DE', name: 'Germany', flag: 'de' },
+  { code: 'FR', name: 'France', flag: 'fr' },
+  { code: 'ES', name: 'Spain', flag: 'es' },
+  { code: 'IT', name: 'Italy', flag: 'it' },
+  { code: 'NL', name: 'Netherlands', flag: 'nl' },
+  { code: 'BE', name: 'Belgium', flag: 'be' },
+  { code: 'PT', name: 'Portugal', flag: 'pt' },
+  { code: 'IE', name: 'Ireland', flag: 'ie' },
+]
+
+// US States
+const US_STATES = [
+  { code: 'AL', name: 'Alabama' }, { code: 'AK', name: 'Alaska' }, { code: 'AZ', name: 'Arizona' },
+  { code: 'AR', name: 'Arkansas' }, { code: 'CA', name: 'California' }, { code: 'CO', name: 'Colorado' },
+  { code: 'CT', name: 'Connecticut' }, { code: 'DE', name: 'Delaware' }, { code: 'FL', name: 'Florida' },
+  { code: 'GA', name: 'Georgia' }, { code: 'HI', name: 'Hawaii' }, { code: 'ID', name: 'Idaho' },
+  { code: 'IL', name: 'Illinois' }, { code: 'IN', name: 'Indiana' }, { code: 'IA', name: 'Iowa' },
+  { code: 'KS', name: 'Kansas' }, { code: 'KY', name: 'Kentucky' }, { code: 'LA', name: 'Louisiana' },
+  { code: 'ME', name: 'Maine' }, { code: 'MD', name: 'Maryland' }, { code: 'MA', name: 'Massachusetts' },
+  { code: 'MI', name: 'Michigan' }, { code: 'MN', name: 'Minnesota' }, { code: 'MS', name: 'Mississippi' },
+  { code: 'MO', name: 'Missouri' }, { code: 'MT', name: 'Montana' }, { code: 'NE', name: 'Nebraska' },
+  { code: 'NV', name: 'Nevada' }, { code: 'NH', name: 'New Hampshire' }, { code: 'NJ', name: 'New Jersey' },
+  { code: 'NM', name: 'New Mexico' }, { code: 'NY', name: 'New York' }, { code: 'NC', name: 'North Carolina' },
+  { code: 'ND', name: 'North Dakota' }, { code: 'OH', name: 'Ohio' }, { code: 'OK', name: 'Oklahoma' },
+  { code: 'OR', name: 'Oregon' }, { code: 'PA', name: 'Pennsylvania' }, { code: 'RI', name: 'Rhode Island' },
+  { code: 'SC', name: 'South Carolina' }, { code: 'SD', name: 'South Dakota' }, { code: 'TN', name: 'Tennessee' },
+  { code: 'TX', name: 'Texas' }, { code: 'UT', name: 'Utah' }, { code: 'VT', name: 'Vermont' },
+  { code: 'VA', name: 'Virginia' }, { code: 'WA', name: 'Washington' }, { code: 'WV', name: 'West Virginia' },
+  { code: 'WI', name: 'Wisconsin' }, { code: 'WY', name: 'Wyoming' }
+]
+
+// Canadian Provinces
+const CA_PROVINCES = [
+  { code: 'AB', name: 'Alberta' }, { code: 'BC', name: 'British Columbia' },
+  { code: 'MB', name: 'Manitoba' }, { code: 'NB', name: 'New Brunswick' },
+  { code: 'NL', name: 'Newfoundland and Labrador' }, { code: 'NS', name: 'Nova Scotia' },
+  { code: 'ON', name: 'Ontario' }, { code: 'PE', name: 'Prince Edward Island' },
+  { code: 'QC', name: 'Quebec' }, { code: 'SK', name: 'Saskatchewan' },
+  { code: 'NT', name: 'Northwest Territories' }, { code: 'NU', name: 'Nunavut' },
+  { code: 'YT', name: 'Yukon' }
+]
+
+// Australian States
+const AU_STATES = [
+  { code: 'NSW', name: 'New South Wales' }, { code: 'VIC', name: 'Victoria' },
+  { code: 'QLD', name: 'Queensland' }, { code: 'SA', name: 'South Australia' },
+  { code: 'WA', name: 'Western Australia' }, { code: 'TAS', name: 'Tasmania' },
+  { code: 'NT', name: 'Northern Territory' }, { code: 'ACT', name: 'Australian Capital Territory' }
+]
+
+function CountrySelectorInline({ value, onChange }: { value: string; onChange: (code: string) => void }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const currentCountry = COUNTRIES.find(c => c.code === value) || COUNTRIES[0]
+
+  return (
+    <div className="mt-3 relative inline-block" ref={dropdownRef}>
+      <div className="text-xs text-white/50 mb-1">Ship to</div>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="bg-white/[0.06] border border-white/10 hover:border-white/20 rounded-lg px-3 py-2 pr-8 flex items-center gap-2 text-sm text-white/90 transition-colors min-w-[180px]"
+      >
+        <span className={`fi fi-${currentCountry.flag}`}></span>
+        <span className="truncate">{currentCountry.name}</span>
+        <svg className={`w-4 h-4 ml-auto transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-1 rounded-lg border border-white/15 bg-black/95 backdrop-blur-md shadow-2xl z-50 max-h-60 overflow-y-auto min-w-[220px]">
+          {COUNTRIES.map((country) => (
+            <button
+              key={country.code}
+              onClick={() => { onChange(country.code); setIsOpen(false) }}
+              className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-white/10 transition-colors ${
+                country.code === value ? 'bg-amber-500/20 text-amber-200' : 'text-white/90'
+              }`}
+            >
+              <span className={`fi fi-${country.flag}`}></span>
+              <span className="truncate">{country.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export type CatalogProduct = {
   id: number
@@ -26,7 +132,7 @@ export type CatalogProduct = {
   }>
 }
 
-export default function CatalogProductDetail({ product }: { product: CatalogProduct }) {
+export default function CatalogProductDetail({ product, genderContext = 'unisex' }: { product: CatalogProduct; genderContext?: 'male' | 'female' | 'unisex' }) {
   const [selectedColor, setSelectedColor] = useState<string | undefined>(undefined)
   const [selectedSize, setSelectedSize] = useState<string | undefined>(undefined)
   const [selectedStyle, setSelectedStyle] = useState<string | undefined>(undefined)
@@ -70,7 +176,7 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
     load()
     return () => { mounted = false }
   }, [product.id])
-  const [priceLabel, setPriceLabel] = useState<string>('—')
+  const [priceLabel, setPriceLabel] = useState<string>('')
   const [priceCurrency, setPriceCurrency] = useState<string>('')
   const [shipLabel, setShipLabel] = useState<string>('—')
   const [shipEta, setShipEta] = useState<string>('')
@@ -154,24 +260,39 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
   // Detect user country (edge header) for shipping estimation
   useEffect(() => {
     let mounted = true
-    fetch('/api/geo').then(r => r.json()).then(j => {
-      if (!mounted) return
-      if (j?.countryCode) setGeoCountry(String(j.countryCode))
-      if (j?.regionCode) setRegionCode(String(j.regionCode))
-    }).catch(() => {})
+    let hadCookie = false
+    // 1) Prefer persisted selector cookie if present
+    try {
+      const all = typeof document !== 'undefined' ? document.cookie || '' : ''
+      const m = /(?:^|; )country_code=([^;]+)/.exec(all)
+      if (m && m[1]) {
+        hadCookie = true
+        if (mounted) setGeoCountry(decodeURIComponent(m[1]).toUpperCase())
+      }
+      const r = /(?:^|; )region_code=([^;]+)/.exec(all)
+      if (r && r[1] && mounted) setRegionCode(decodeURIComponent(r[1]).toUpperCase())
+    } catch {}
+    // 2) Edge geo fallback only if no cookie preset
+    if (!hadCookie) {
+      fetch('/api/geo').then(r => r.json()).then(j => {
+        if (!mounted) return
+        if (j?.countryCode) setGeoCountry(String(j.countryCode))
+        if (j?.regionCode) setRegionCode(String(j.regionCode))
+      }).catch(() => {})
+    }
     // Client-side locale fallback (e.g., it-IT -> IT) if edge header is missing or defaults to US
     try {
       const lang = (typeof navigator !== 'undefined' && navigator.language) ? navigator.language : ''
       const m = /-([A-Z]{2})$/i.exec(lang)
       if (m && m[1]) {
         const cc = m[1].toUpperCase()
-        setGeoCountry((prev) => (prev === 'US' ? cc : prev))
+        setGeoCountry((prev) => (prev ? prev : cc))
       }
     } catch {}
     return () => { mounted = false }
   }, [])
 
-  // Fetch prices for catalog product
+  // Fetch selling price from DB (not Printful) for catalog product
   useEffect(() => {
     let mounted = true
     const catalogId = (product as any).catalog_product_id || product.id
@@ -183,43 +304,26 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
         const eurCountries = new Set(['IT','FR','DE','ES','NL','BE','PT','IE','FI','AT','GR','EE','LV','LT','LU','MT','SI','SK','CY'])
         const desiredCurrency = cc === 'GB' || cc === 'UK' ? 'GBP' : eurCountries.has(cc) ? 'EUR' : 'USD'
         const sellingRegion = eurCountries.has(cc) || cc === 'GB' || cc === 'UK' ? 'eu' : 'us'
-        const res = await fetch(`/api/printful/prices?product_id=${catalogId}&currency=${desiredCurrency}&selling_region=${sellingRegion}`)
+        // Find DB id via a lightweight lookup if not present
+        let dbId = (product as any)._db_id
+        if (!dbId) {
+          try {
+            const r = await fetch(`/api/db/products?limit=1&printful_id=${encodeURIComponent(String(product.id))}`)
+            if (r.ok) {
+              const j = await r.json()
+              const first = Array.isArray(j?.result) ? j.result[0] : null
+              if (first?.id) dbId = first.id
+            }
+          } catch {}
+        }
+        if (!dbId) return
+        const res = await fetch(`/api/db/price?product_id=${encodeURIComponent(dbId)}&currency=${desiredCurrency}&region=${sellingRegion}`)
         if (!res.ok) return
         const data = await res.json()
-        const payload = data?.result || {}
-        // Heuristics: find a minimal base price. v2 returns array or object; try common shapes
-        let amount: number | null = null
-        let resultCurrency = ''
-        const tryNum = (v: any) => {
-          const n = Number(v)
-          return Number.isFinite(n) ? n : null
-        }
-        if (Array.isArray(payload)) {
-          for (const item of payload) {
-            const a = tryNum(item?.price?.amount ?? item?.min_price?.amount ?? item?.base_price?.amount)
-            const cur = item?.price?.currency || item?.min_price?.currency || item?.base_price?.currency || ''
-            if (a != null && (amount == null || a < amount)) { amount = a; resultCurrency = cur }
-          }
-        } else if (payload) {
-          const a = tryNum(payload?.price?.amount ?? payload?.min_price?.amount ?? payload?.base_price?.amount)
-          const cur = payload?.price?.currency || payload?.min_price?.currency || payload?.base_price?.currency || ''
-          if (a != null) { amount = a; resultCurrency = cur }
-        }
-        if (amount != null) {
-          setPriceLabel(amount.toFixed(2))
-          setPriceCurrency(resultCurrency || desiredCurrency)
-        } else {
-          // Fallback: compute min from product variants if present
-          const variants: any[] = Array.isArray((product as any)?.variants) ? (product as any).variants : []
-          let min = Infinity
-          for (const v of variants) {
-            const p = Number(v?.price)
-            if (Number.isFinite(p)) min = Math.min(min, p)
-          }
-          if (min !== Infinity) {
-            setPriceLabel(min.toFixed(2))
-            setPriceCurrency((variants[0]?.currency as string) || desiredCurrency)
-          }
+        const payload = data?.result
+        if (payload?.price != null) {
+          setPriceLabel(Number(payload.price).toFixed(2))
+          setPriceCurrency(payload.currency || desiredCurrency)
         }
       } catch {}
     })()
@@ -233,63 +337,94 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
     if (!catalogId || !activeVariant?.id || !geoCountry) return
     ;(async () => {
       try {
-        // Check if product ships to country
-        const sc = await fetch(`/api/printful/shipping-countries?product_id=${catalogId}`)
-        if (sc.ok) {
-          const j = await sc.json()
-          const list: any[] = j?.result || []
-          const ok = list.some((c: any) => String(c?.code || c?.country_code || '').toUpperCase() === String(geoCountry).toUpperCase())
-          setShippingAvailable(ok)
-          if (!ok) { setShipLabel('Unavailable'); setShipEta(''); return }
+        // Use Printful v2 shipping rates with catalog_variant_id
+        const catalogVariantId = activeVariant?.catalog_variant_id || activeVariant?.id
+        if (!catalogVariantId) {
+          setShipLabel('—')
+          setShipEta('at checkout')
+          setShippingAvailable(true)
+          return
         }
-        // Find a matching variant and use v1 variant_id for shipping rates (v1 endpoint)
-        let variantId = activeVariant.id
-        try {
-          const vres = await fetch(`/api/printful/variants?product_id=${catalogId}`)
-          if (vres.ok) {
-            const vj = await vres.json()
-            const arr: any[] = vj?.result || []
-            const found = arr.find((v: any) => String(v.size||'')===String(selectedSize||'') && String(v.color||'')===String(selectedColor||''))
-            if (found?.variant_id) variantId = found.variant_id
-          }
-        } catch {}
-        const body: any = { country_code: geoCountry, variant_id: variantId }
-        if ((geoCountry === 'US' || geoCountry === 'CA') && regionCode) body.state_code = regionCode
-        const sr = await fetch('/api/printful/shipping-rates', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+        
+        const params = new URLSearchParams({
+          catalog_variant_id: String(catalogVariantId),
+          country_code: geoCountry,
+          quantity: '1'
         })
+        if ((geoCountry === 'US' || geoCountry === 'CA' || geoCountry === 'AU') && regionCode) {
+          params.set('state_code', regionCode)
+        }
+        
+        console.log('[Shipping] Fetching rates:', { catalogVariantId, geoCountry, regionCode, url: `/api/shipping-rates?${params.toString()}` })
+        
+        const sr = await fetch(`/api/shipping-rates?${params.toString()}`)
         if (sr.ok) {
           const j = await sr.json()
-          const list: any[] = (j?.result?.rates || j?.result || []) as any[]
-          // pick the cheapest rate
+          console.log('[Shipping] API response:', j)
+          if (!j.available) {
+            setShipLabel('Unavailable')
+            setShippingAvailable(false)
+            setShipEta('')
+            return
+          }
+          const rates: any[] = j?.rates || []
+          if (rates.length === 0) {
+            // No rates but available - might need more address details
+            console.log('[Shipping] Empty rates, needs state?', { geoCountry, regionCode })
+            setShipLabel('—')
+            setShipEta((geoCountry === 'US' || geoCountry === 'CA' || geoCountry === 'AU') && !regionCode ? 'Select state for estimate' : 'at checkout')
+            setShippingAvailable(true)
+            return
+          }
+          // Pick the cheapest standard rate
           let best: any = null
-          for (const r of list) {
-            const amt = Number(r?.rate ?? r?.amount ?? r?.price?.amount)
+          for (const r of rates) {
+            const amt = Number(r?.rate)
             if (!Number.isFinite(amt)) continue
             if (!best || amt < Number(best._amt)) best = { ...r, _amt: amt }
           }
-          if (best) {
+          if (best && mounted) {
             setShipLabel(String(best._amt.toFixed(2)))
-            setShipCurrency(best?.currency || best?.price?.currency || '')
+            setShipCurrency(best?.currency || 'USD')
+            setShippingAvailable(true)
             const eta = best?.min_delivery_days && best?.max_delivery_days
               ? `${best.min_delivery_days}–${best.max_delivery_days} days`
-              : (best?.delivery_estimate || '')
-            setShipEta(eta || '')
+              : ''
+            setShipEta(eta)
           } else {
-            // No rates returned (e.g., missing state); show placeholder
             setShipLabel('—')
             setShipCurrency('')
-            setShipEta('')
+            setShipEta('at checkout')
+            setShippingAvailable(true)
           }
+        } else {
+          // API error - assume available but show checkout
+          setShipLabel('—')
+          setShipEta('at checkout')
+          setShippingAvailable(true)
         }
       } catch {
-        setShippingAvailable(false)
+        // Error - assume available but show checkout
+        setShipLabel('—')
+        setShipEta('at checkout')
+        setShippingAvailable(true)
       }
     })()
     return () => { mounted = false }
-  }, [product.id, activeVariant?.id, selectedColor, selectedSize, geoCountry])
+  }, [product.id, activeVariant?.id, selectedColor, selectedSize, geoCountry, regionCode])
+
+  // Persist country/state selector to cookies
+  const persistGeo = (country: string, region?: string) => {
+    try {
+      const cc = (country || '').toUpperCase()
+      const rc = (region || '').toUpperCase()
+      const opts = 'path=/; max-age=31536000; SameSite=Lax'
+      document.cookie = `country_code=${encodeURIComponent(cc)}; ${opts}`
+      if (rc) document.cookie = `region_code=${encodeURIComponent(rc)}; ${opts}`
+      setGeoCountry(cc)
+      if (rc) setRegionCode(rc)
+    } catch {}
+  }
 
   // Normalize placement keys and labels
   const normPlacement = (p: string) => {
@@ -304,10 +439,29 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
   // Helper: classify mockup style from URL for ordering
   const styleRank = (url: string) => {
     const u = String(url).toLowerCase()
-    if (/(onman\b|\bmen\b|onwoman|womens|women\b|model)/i.test(u)) return 0 // model first
-    if (/ghost/.test(u)) return 1
-    if (/flat/.test(u)) return 2
-    return 3
+    
+    // Gender-specific prioritization based on context
+    if (genderContext === 'female') {
+      if (/(onwoman|womens|women\b)/i.test(u)) return 0 // Women's model first
+      if (/flat/.test(u)) return 1
+      if (/ghost/.test(u)) return 2
+      if (/(onman\b|\bmen\b)/i.test(u)) return 3 // Men's model last
+      if (/model/i.test(u)) return 4 // Generic model
+      return 5
+    } else if (genderContext === 'male') {
+      if (/(onman\b|\bmen\b)/i.test(u)) return 0 // Men's model first
+      if (/flat/.test(u)) return 1
+      if (/ghost/.test(u)) return 2
+      if (/(onwoman|womens|women\b)/i.test(u)) return 3 // Women's model last
+      if (/model/i.test(u)) return 4 // Generic model
+      return 5
+    } else {
+      // Unisex: prefer neutral first
+      if (/flat/.test(u)) return 0
+      if (/ghost/.test(u)) return 1
+      if (/(onman\b|\bmen\b|onwoman|womens|women\b|model)/i.test(u)) return 2 // Any model
+      return 3
+    }
   }
   const normUrl = (u: string) => String(u || '').split('?')[0]
 
@@ -415,7 +569,7 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
           return true
         })
         if (!mounted) return
-        // Scoring preferences per placement: background_image > background_color; women's prefer onwoman/womens; unisex prefer ghost/flat
+        // Scoring preferences per placement: background_image > background_color; apply gender context
         const scored: ScoredImage[] = list.map((it) => {
           const url = it.image_url || ''
           let s = 0
@@ -424,7 +578,19 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
           // prefer canonical front/back over "_large" only slightly
           const norm = normPlacement(it.placement).key
           if (norm === 'front') s += 1
-          // Remove gender/unisex weighting to avoid unintended biases.
+          
+          // Apply gender-specific scoring based on context
+          if (genderContext === 'female') {
+            if (/(onwoman|womens|women\b)/i.test(url)) s += 10
+            if (/(onman\b|\bmen\b)/i.test(url)) s -= 5
+          } else if (genderContext === 'male') {
+            if (/(onman\b|\bmen\b)/i.test(url)) s += 10
+            if (/(onwoman|womens|women\b)/i.test(url)) s -= 5
+          } else {
+            // Unisex: prefer neutral
+            if (/(flat|ghost)/i.test(url)) s += 5
+          }
+          
           return { ...it, _score: s, _key: norm }
         })
         // Save all scored images for gallery (stable sort by score desc), ensure non-empty src
@@ -777,27 +943,59 @@ export default function CatalogProductDetail({ product }: { product: CatalogProd
             <div className="rounded-xl bg-white/[0.03] border border-white/10 p-4">
               <div className="text-xs text-white/60 mb-1">Price</div>
               <div className="text-2xl font-semibold">
-                {priceLabel !== '—' ? (<><span>{priceCurrency}</span> <span>{priceLabel}</span></>) : '—'}
+                {priceLabel ? (
+                  <><span>{priceCurrency}</span> <span>{priceLabel}</span></>
+                ) : (
+                  <span className="inline-block h-4 w-24 bg-white/10 rounded animate-pulse" />
+                )}
               </div>
               <div className="text-xs text-white/50 mt-1">Base price incl. first placement where applicable</div>
             </div>
 
             <div className="rounded-xl bg-white/[0.03] border border-white/10 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-xs text-white/60 mb-1">Estimated delivery to</div>
-                  <div className="text-sm text-white/80">{geoCountry}</div>
+              <div className="text-xs text-white/60 mb-3">Estimated delivery to</div>
+              
+              {/* Country Selector */}
+              <CountrySelectorInline value={geoCountry || 'US'} onChange={persistGeo} />
+              
+              {/* State Selector (for US, CA, AU) */}
+              {(geoCountry === 'US' || geoCountry === 'CA' || geoCountry === 'AU') && (
+                <div className="mt-3">
+                  <select
+                    value={regionCode || ''}
+                    onChange={(e) => {
+                      const newRegion = e.target.value
+                      setRegionCode(newRegion)
+                      persistGeo(geoCountry, newRegion)
+                    }}
+                    className="w-full bg-white/[0.06] border border-white/10 hover:border-white/20 rounded-lg px-3 py-2 text-sm text-white/90 transition-colors [&>option]:bg-black [&>option]:text-white"
+                    style={{ colorScheme: 'dark' }}
+                  >
+                    <option value="">Select {geoCountry === 'US' ? 'State' : geoCountry === 'CA' ? 'Province' : 'State/Territory'}</option>
+                    {geoCountry === 'US' && US_STATES.map(s => <option key={s.code} value={s.code}>{s.code} - {s.name}</option>)}
+                    {geoCountry === 'CA' && CA_PROVINCES.map(p => <option key={p.code} value={p.code}>{p.code} - {p.name}</option>)}
+                    {geoCountry === 'AU' && AU_STATES.map(a => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
+                  </select>
                 </div>
-                <div className="text-right">
+              )}
+              
+              {/* Shipping Cost & ETA */}
+              <div className="mt-4 pt-4 border-t border-white/10">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs text-white/60">Shipping cost</div>
                   <div className="text-base font-medium">
-                    {shippingAvailable ? (<>{shipCurrency} {shipLabel}</>) : (
-                      <span className="inline-flex items-center gap-2 text-rose-300">
-                        <span className="inline-block w-2 h-2 rounded-full bg-rose-400" /> Not available in your region
-                      </span>
+                    {shippingAvailable ? (
+                      shipLabel ? (<>{shipCurrency} {shipLabel}</>) : (
+                        <span className="inline-block h-4 w-20 bg-white/10 rounded animate-pulse" />
+                      )
+                    ) : (
+                      <span className="text-rose-300 text-sm">Unavailable</span>
                     )}
                   </div>
-                  <div className="text-xs text-white/60">{shipEta || (shippingAvailable ? 'Shipping estimate' : 'Not shippable')}</div>
                 </div>
+                {shipEta && (
+                  <div className="text-xs text-white/60 mt-2 text-right">{shipEta}</div>
+                )}
               </div>
             </div>
 

@@ -7,13 +7,17 @@ import { createClient } from '@/lib/supabase/browser'
 
 type CartItem = {
   id: string
-  product_id: number
-  variant_id: number
+  product_id: string // UUID of product from database
+  variant_id: string // UUID of variant from database
+  printful_product_id?: number // Printful product ID (for reference)
+  printful_variant_id?: number // Printful variant ID (for ordering)
   color: string | null
   size: string | null
   quantity: number
-  files: Array<{ placement: string; image_url: string; position: any }>
-  mockups: Array<{ url: string; placement: string }>
+  files: Array<{ placement: string; image_url: string; position: any }> // AI design files
+  mockups: Array<{ url: string; placement: string }> // Design mockup previews
+  prompt?: string | null
+  style?: string | null
 }
 
 export default function CartPage() {
@@ -72,30 +76,45 @@ export default function CartPage() {
 
   const fetchPrices = async (itemsToPrice: CartItem[]) => {
     const out: Record<string, { amount: number; currency: string }> = {}
+    
+    // Get user's currency from cookies or default to USD
+    const userCurrency = typeof document !== 'undefined' ? (document.cookie.match(/currency=([^;]+)/)?.[1] || 'USD') : 'USD'
+    
     await Promise.all(itemsToPrice.map(async (it) => {
+      const key = `${it.product_id}-${it.variant_id}`
+      
       try {
-        const r = await fetch(`/api/printful/product?product_id=${it.product_id}`)
+        // Use our selling price API (with markup) - pass database product UUID
+        const r = await fetch(`/api/db/price?product_id=${it.product_id}&currency=${userCurrency}`)
         const j = await r.json().catch(() => ({}))
-        const result = j?.result || {}
-        const v = (result?.variants || []).find((vv: any) => Number(vv.id) === Number(it.variant_id))
-        const amount = Number(v?.price || 0)
-        if (Number.isFinite(amount) && amount > 0) {
-          out[`${it.product_id}-${it.variant_id}`] = { amount, currency: v?.currency || 'USD' }
-          return
+        
+        if (j?.success && j?.result?.price) {
+          const amount = Number(j.result.price)
+          const curr = j.result.currency || userCurrency
+          if (Number.isFinite(amount) && amount > 0) {
+            out[key] = { amount, currency: curr }
+            console.log(`[Cart] Got selling price for ${key}:`, amount, curr)
+            return
+          }
         }
-      } catch {}
-      // Fallback minimal price endpoint
-      try {
-        const r2 = await fetch(`/api/printful/prices?product_id=${it.product_id}`)
-        const j2 = await r2.json().catch(() => ({}))
-        const res = j2?.result || {}
-        const priceObj = res?.price || res
-        const amount = Number(priceObj?.amount || 0)
-        const cur = priceObj?.currency || 'USD'
-        if (Number.isFinite(amount) && amount > 0) {
-          out[`${it.product_id}-${it.variant_id}`] = { amount, currency: cur }
-        }
-      } catch {}
+      } catch (err) {
+        console.error(`[Cart] Failed to fetch selling price for ${key}:`, err)
+      }
+      
+      // Fallback to Printful price (this should rarely happen)
+      if (it.printful_product_id && it.printful_variant_id) {
+        try {
+          const r2 = await fetch(`/api/printful/product?product_id=${it.printful_product_id}`)
+          const j2 = await r2.json().catch(() => ({}))
+          const result = j2?.result || {}
+          const v = (result?.variants || []).find((vv: any) => Number(vv.id) === Number(it.printful_variant_id))
+          const amount = Number(v?.price || 0)
+          if (Number.isFinite(amount) && amount > 0) {
+            console.warn(`[Cart] Using Printful fallback price for ${key}:`, amount)
+            out[key] = { amount, currency: v?.currency || 'USD' }
+          }
+        } catch {}
+      }
     }))
     setPrices(out)
   }
@@ -103,16 +122,26 @@ export default function CartPage() {
   useEffect(() => { if (items.length) fetchPrices(items) }, [items])
 
   const fetchTitles = async (itemsToQuery: CartItem[]) => {
-    const distinct = Array.from(new Set(itemsToQuery.map((i) => i.product_id)))
-    const map: Record<number, string> = {}
-    await Promise.all(distinct.map(async (pid) => {
-      try {
-        const r = await fetch(`/api/printful/product?product_id=${pid}`)
-        const j = await r.json().catch(() => ({}))
-        const title = j?.result?.title as string | undefined
-        if (title) map[pid] = title
-      } catch {}
-    }))
+    const map: Record<string, string> = {}
+    
+    // All items have database product references, fetch from DB
+    const productIds = Array.from(new Set(itemsToQuery.map((i) => i.product_id)))
+    
+    try {
+      const { data: products } = await supabase
+        .from('products')
+        .select('id, name')
+        .in('id', productIds)
+      
+      if (products) {
+        for (const p of products) {
+          map[p.id as any] = p.name
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch product names:', err)
+    }
+    
     setTitles(map)
   }
 
@@ -147,7 +176,7 @@ export default function CartPage() {
       const payload = {
         country_code: country,
         ...(stateCode ? { state_code: stateCode } : {}),
-        items: items.map((it) => ({ variant_id: it.variant_id, quantity: Math.max(1, it.quantity || 1) })),
+        items: items.map((it) => ({ variant_id: it.printful_variant_id || 0, quantity: Math.max(1, it.quantity || 1) })).filter(i => i.variant_id > 0),
       }
       const r = await fetch('/api/printful/shipping-rates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       const j = await r.json().catch(() => ({}))
@@ -182,21 +211,23 @@ export default function CartPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
             {items.map((it) => {
-            const thumb = it.mockups?.[0]?.url || ''
+              const thumb = it.mockups?.[0]?.url || '' // Custom design mockup preview
               const key = `${it.product_id}-${it.variant_id}`
               const price = prices[key]?.amount
+              const productName = titles[it.product_id as any] || 'Loading...'
               return (
               <div key={it.id} className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 flex gap-4 items-center">
                 <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-white/10 bg-white/[0.06]">
                   {thumb ? (
                     <Image src={thumb} alt="item" fill sizes="96px" className="object-cover" />
                   ) : (
-                    <div className="absolute inset-0 grid place-items-center text-white/50 text-xs">No image</div>
+                    <div className="absolute inset-0 grid place-items-center text-white/50 text-xs">No preview</div>
                   )}
                 </div>
                 <div className="flex-1">
-                  <div className="text-sm text-white/90">{titles[it.product_id] || `Product #${it.product_id}`}</div>
-                  <div className="text-xs text-white/60">Variant #{it.variant_id} · {it.color || '-'} · {it.size || '-'}</div>
+                  <div className="text-sm text-white/90">{productName}</div>
+                  <div className="text-xs text-white/60">{it.color || '-'} · {it.size || '-'}</div>
+                  {it.prompt && <div className="text-xs text-white/40 mt-1">Design: {it.prompt}</div>}
                   {typeof price === 'number' && (
                     <div className="text-sm text-white/80 mt-1">Price: {price.toFixed(2)} {currency}</div>
                   )}

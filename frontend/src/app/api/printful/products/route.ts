@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createServiceClient } from '@/lib/database'
+import { calculateRetailPrice } from '@/lib/pricing'
 
 export const runtime = 'nodejs'
 
@@ -29,6 +31,7 @@ export async function GET(req: NextRequest) {
     const locale = searchParams.get('locale') || (req.cookies.get('locale')?.value || '')
     const countryCode = (searchParams.get('country_code') || req.cookies.get('country_code')?.value || '').toUpperCase()
     const sortType = searchParams.get('sort') || 'bestseller'
+    const genderContext = (searchParams.get('gender') as 'male' | 'female' | 'unisex') || 'unisex'
 
     if (!categoryId) {
       return NextResponse.json({ error: 'category_id is required' }, { status: 400 })
@@ -77,6 +80,9 @@ export async function GET(req: NextRequest) {
       usedV2 = false
     }
 
+    // Prepare DB client for our selling price override
+    const supabase = await createServiceClient()
+
     // 2) Process products in batches to avoid overwhelming the API
     const batchLimit = 10 // Process 10 products at a time
     const processedProducts: any[] = []
@@ -110,22 +116,25 @@ export async function GET(req: NextRequest) {
                 background_image: it.background_image || null,
                 background_color: it.background_color || null,
               }))
-              const womens = /women|ladies|women's/i.test(p.title || '')
-              const unisex = /unisex/i.test(p.title || '')
               const scored = items.map((it) => {
                 const url = it.image_url || ''
                 let s = 0
                 if (it.background_image) s += 3
                 if (it.background_color) s += 1
                 if (/^front$/.test(it.placement) || /front/.test(it.placement)) s += 2
-                if (womens) {
-                  if (/(onwoman|womens|women\b)/i.test(url)) s += 6
-                  if (/(onman\b|\bmen\b)/i.test(url)) s -= 3
+                
+                // Apply gender-specific scoring based on category context (not product title)
+                if (genderContext === 'female') {
+                  if (/(onwoman|womens|women\b)/i.test(url)) s += 10
+                  if (/(onman\b|\bmen\b)/i.test(url)) s -= 5
+                } else if (genderContext === 'male') {
+                  if (/(onman\b|\bmen\b)/i.test(url)) s += 10
+                  if (/(onwoman|womens|women\b)/i.test(url)) s -= 5
+                } else {
+                  // Unisex: prefer neutral
+                  if (/(ghost|flat)/i.test(url)) s += 5
                 }
-                if (unisex) {
-                  if (/(ghost|flat)/i.test(url)) s += 3
-                  if (/onman\b/i.test(url)) s -= 1
-                }
+                
                 return { ...it, _score: s }
               })
               // prefer front images among ties
@@ -152,25 +161,52 @@ export async function GET(req: NextRequest) {
               } catch {}
             }
 
-            // Fetch actual product price from variants with correct currency for country
-            let price = null
+            // Our selling price (preferred) or Printful fallback
+            let price: string | null = null
             let currency = 'USD'
+            let dbId: string | null = null
+            
+            // Map country codes to currencies
+            const getCurrency = (countryCode: string) => {
+              const currencyMap: Record<string, string> = {
+                'US': 'USD',
+                'CA': 'CAD', 
+                'GB': 'GBP',
+                'FR': 'EUR',
+                'DE': 'EUR',
+                'ES': 'EUR',
+                'IT': 'EUR',
+                'AU': 'AUD',
+                'JP': 'JPY',
+                'BR': 'BRL',
+                'KR': 'KRW',
+                'NZ': 'NZD',
+                'LV': 'EUR'
+              }
+              return currencyMap[countryCode] || 'USD'
+            }
+            
+            // First try our DB selling price
             try {
-              // Use country-specific pricing if available
-              const priceUrl = countryCode 
-                ? `/v2/catalog-products/${p.id}/prices?destination_country=${countryCode}`
-                : `/v2/catalog-products/${p.id}/prices`
-              const priceData = await pf(priceUrl, locale)
-              
-              if (priceData?.data?.variants?.[0]?.techniques?.[0]) {
-                const variant = priceData.data.variants[0]
-                const technique = variant.techniques[0]
-                price = technique.discounted_price || technique.price
-                currency = priceData.data.currency || 'USD'
+              const desiredCurrency = countryCode ? getCurrency(countryCode) : 'USD'
+              const { data: row } = await supabase
+                .from('products')
+                .select('id, base_price_usd')
+                .eq('printful_id', p.id)
+                .limit(1)
+              dbId = row?.[0]?.id || null
+              const base = row?.[0]?.base_price_usd
+              if (dbId && base != null) {
+                const pricing = await calculateRetailPrice(Number(base), desiredCurrency, dbId)
+                price = pricing.retailPrice.toFixed(2)
+                currency = pricing.currency
               }
             } catch {}
 
-            return { ...p, thumbnail: thumb, _ships: ships, price, currency }
+            // DO NOT fallback to Printful price - we only show our selling price
+            // If DB price is not available, price will remain null and badge won't show
+
+            return { ...p, thumbnail: thumb, _ships: ships, price, currency, _db_id: dbId }
           } catch (e) {
             return null // Skip failed products
           }

@@ -2,6 +2,7 @@ import { headers } from 'next/headers'
 import Link from 'next/link'
 import BackHomeBar from '@/components/back-home-bar'
 import CatalogProductDetail from '@/components/catalog-product-detail'
+import { getCategoryGender } from '@/lib/category-utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,8 +13,10 @@ async function absoluteUrl(path: string) {
   return `${proto}://${host}${path}`
 }
 
-export default async function CatalogProductPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CatalogProductPage({ params, searchParams }: { params: Promise<{ id: string }>, searchParams?: Promise<{ from_category?: string }> }) {
   const { id } = await params
+  const sp = await (searchParams || Promise.resolve({}))
+  const fromCategory = sp.from_category ? Number(sp.from_category) : null
   const pid = Number(id)
   if (!pid || Number.isNaN(pid)) {
     return (
@@ -49,9 +52,12 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
     )
   }
 
-  // Fetch categories to build breadcrumbs from product.main_category_id
+  // Fetch categories to build breadcrumbs and determine gender context
+  // Use from_category if provided, otherwise fall back to product.main_category_id
   type PfCategory = { id: number; title: string; image_url: string | null; parent_id: number }
   let ancestors: PfCategory[] = []
+  let genderContext: 'male' | 'female' | 'unisex' = 'unisex'
+  
   try {
     const cres = await fetch(await absoluteUrl(`/api/printful/categories`), { cache: 'no-store' })
     if (cres.ok) {
@@ -59,11 +65,17 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
       const cats: PfCategory[] = (cdata?.result?.categories || []) as PfCategory[]
       const byId = new Map<number, PfCategory>()
       for (const c of cats) byId.set(c.id, c)
-      let cur: PfCategory | undefined = byId.get(product.main_category_id as number)
+      
+      // Build breadcrumb from the category user came from, or product's main category
+      const categoryId = fromCategory || (product.main_category_id as number)
+      let cur: PfCategory | undefined = byId.get(categoryId)
       while (cur) {
         ancestors.unshift(cur)
         cur = byId.get(cur.parent_id)
       }
+      
+      // Determine gender context for image filtering
+      genderContext = getCategoryGender(categoryId, cats)
     }
   } catch {}
 
@@ -81,7 +93,7 @@ export default async function CatalogProductPage({ params }: { params: Promise<{
           ))}
         </div>
       )}
-      <CatalogProductDetail product={product} />
+      <CatalogProductDetail product={product} genderContext={genderContext} />
     </main>
   )
 }

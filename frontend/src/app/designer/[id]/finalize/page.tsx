@@ -232,18 +232,68 @@ export default function FinalizePage() {
       })
       const { data: u } = await supabase.auth.getUser()
       const userId = u.user?.id
-      await supabase.from('cart_items').insert({
+      
+      // Look up database product by Printful ID
+      console.log('[Add to Cart] Looking up product with printful_id:', productId)
+      const { data: dbProduct, error: productError } = await supabase
+        .from('products')
+        .select('id, name, printful_id')
+        .eq('printful_id', productId)
+        .single()
+      
+      if (productError || !dbProduct) {
+        console.error('[Add to Cart] Product lookup failed. Printful ID:', productId, 'Error:', productError)
+        throw new Error(`Product #${productId} not found in database. Please sync products first.`)
+      }
+      
+      console.log('[Add to Cart] Found product:', dbProduct.name, 'DB ID:', dbProduct.id)
+      
+      // Look up database variant by Printful variant ID
+      console.log('[Add to Cart] Looking up variant with printful_variant_id:', variantId, 'for product:', dbProduct.id)
+      const { data: dbVariant, error: variantError } = await supabase
+        .from('variants')
+        .select('id, printful_variant_id, size, color')
+        .eq('printful_variant_id', variantId)
+        .eq('product_id', dbProduct.id)
+        .single()
+      
+      if (variantError || !dbVariant) {
+        console.error('[Add to Cart] Variant lookup failed. Printful variant ID:', variantId, 'Product DB ID:', dbProduct.id, 'Error:', variantError)
+        
+        // Show available variants for debugging
+        const { data: availableVariants } = await supabase
+          .from('variants')
+          .select('printful_variant_id, size, color')
+          .eq('product_id', dbProduct.id)
+          .limit(5)
+        console.log('[Add to Cart] Available variants for this product:', availableVariants)
+        
+        throw new Error(`Variant #${variantId} not found for product "${dbProduct.name}". Available variants: ${availableVariants?.map(v => `${v.size}-${v.color} (ID: ${v.printful_variant_id})`).join(', ')}`)
+      }
+      
+      console.log('[Add to Cart] Found variant:', dbVariant.size, dbVariant.color, 'DB ID:', dbVariant.id)
+      
+      // Insert to cart with database references
+      const { error: insertError } = await supabase.from('cart_items').insert({
         user_id: userId,
-        product_id: productId,
-        variant_id: variantId,
+        product_id: dbProduct.id, // Database product UUID
+        variant_id: dbVariant.id, // Database variant UUID
+        printful_product_id: productId, // Printful product ID (for reference)
+        printful_variant_id: variantId, // Printful variant ID (for ordering)
         color: colorEff,
         size: sizeEff,
         quantity: 1,
-        files,
-        mockups,
+        files, // AI-generated design files with positions
+        mockups, // Generated mockup previews
         prompt: draft?.prompt ?? null,
         style: draft?.style ?? null,
       })
+      
+      if (insertError) {
+        console.error('Cart insert error:', insertError)
+        throw new Error('Failed to add to cart: ' + insertError.message)
+      }
+      
       router.push('/cart')
     } catch (e) {
       console.error(e)
