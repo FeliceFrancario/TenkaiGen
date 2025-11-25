@@ -177,13 +177,6 @@ export default function CategoriesPage() {
   return (
     <main className="min-h-[60vh] px-6 py-16 max-w-5xl mx-auto text-white">
       <BackHomeBar />
-      {(shortcutMode || isGenerating) && (
-        <div className="mb-4 rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-amber-200">
-          <div className="text-sm">
-            Generating designs for: <span className="font-medium text-amber-100">{(prompt || '').slice(0,120) || 'your prompt'}</span>. Pick a category to guide the results while you wait.
-          </div>
-        </div>
-      )}
       <h1 className="text-3xl font-semibold mb-6">All products</h1>
       <p className="text-white/60 mb-8">Browse categories, then pick a product → style → prompt.</p>
       <div className="space-y-12">

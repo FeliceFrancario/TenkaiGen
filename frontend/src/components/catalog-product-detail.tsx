@@ -817,27 +817,10 @@ export default function CatalogProductDetail({ product, genderContext = 'unisex'
             ) : (
               <div className="w-full h-full" />
             )}
-            {/* Overlay loader if generating or no active image */}
-            {(!activeImage || isGenerating) && (
-              <div className="absolute inset-0 bg-black/20 backdrop-blur-[1px] flex items-center justify-center gap-3">
-                <span className="inline-block w-5 h-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                <span className="text-white/80 text-sm">Generating preview...</span>
-              </div>
-            )}
-            {/* Small badge if image exists but still generating more */}
-            {activeImage && isGenerating && (
-              <div className="absolute top-2 left-2 text-[10px] px-2 py-1 rounded-full bg-white/10 border border-white/20 text-white/80">Generating…</div>
-            )}
+            {/* Clean preview without blur/overlays */}
           </div>
 
-          {/* Variant output skeletons while generating */}
-          {(isGenerating || allImages.length === 0) && (
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              <div className="h-16 rounded-lg bg-white/[0.06] border border-white/10 animate-pulse" />
-              <div className="h-16 rounded-lg bg-white/[0.06] border border-white/10 animate-pulse" />
-              <div className="h-16 rounded-lg bg-white/[0.06] border border-white/10 animate-pulse" />
-            </div>
-          )}
+          {/* No generating skeletons to keep page clean */}
         </div>
 
         {/* Thumbnails (mobile) */}

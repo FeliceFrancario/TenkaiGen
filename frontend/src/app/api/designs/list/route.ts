@@ -24,13 +24,13 @@ export async function GET(req: NextRequest) {
     const prefix = process.env.B2_S3_PREFIX || '' // optional folder
 
     const client = makeClient()
-    const cmd = new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix || undefined, MaxKeys: 50 })
+    const cmd = new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix || undefined, MaxKeys: 200 })
     const resp = await client.send(cmd)
 
     const keys = (resp.Contents || [])
       .map((o: { Key?: string } | undefined) => (o && o.Key) || '')
       .filter((k: string): k is string => !!k && /\.(png|jpg|jpeg|webp)$/i.test(k))
-      .slice(0, 30)
+      .slice(0, 120)
 
     // Generate presigned URLs for private objects
     const urls = await Promise.all(

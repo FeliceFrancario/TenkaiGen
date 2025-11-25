@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { FiX } from 'react-icons/fi'
 import { GiMagicBroom } from 'react-icons/gi'
-import { FaImage } from "react-icons/fa6";
+import { FaImage } from 'react-icons/fa6'
 import { SparklesCore } from '@/components/ui/sparkles'
 import { useRouter } from 'next/navigation'
 import { useFlow } from '@/components/flow-provider'
@@ -13,7 +13,7 @@ export function Hero() {
   const [attachments, setAttachments] = useState<File[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
-  const { setPrompt: setFlowPrompt, setShortcutMode, setGenerating, setProduct, setStyle, setFranchise, setExpandedPrompt } = useFlow()
+  const { setPrompt: setFlowPrompt, setShortcutMode, setGenerating, setProduct, setStyle, setFranchise, setExpandedPrompt, setLastJobId, setVariants } = useFlow()
 
   // Typewriter headline
   const phrases = [
@@ -65,48 +65,80 @@ export function Hero() {
     setAttachments((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const onSend = async () => {
-    if (!prompt.trim() && attachments.length === 0) return
-    // Start shortcut flow: we parse the prompt to guess a product and begin generating
-    try {
-      setFlowPrompt(prompt.trim())
-      setShortcutMode(true)
-      setGenerating(true)
-      setExpandedPrompt(undefined)
-      setFranchise(undefined)
-      console.debug('[hero] onSend start', { prompt: prompt.trim(), attachments: attachments.length })
-      // Navigate immediately; parsing runs in background
-      router.push('/catalog')
+  const onSend = () => {
+    if (!prompt.trim()) return
 
-      ;(async () => {
-        try {
-          const res = await fetch('/api/parse-prompt', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt }),
-          })
-          if (!res.ok) {
-            console.warn('[hero] parse-prompt non-OK', { status: res.status })
-            return
+    setFlowPrompt(prompt.trim())
+    setShortcutMode(true)
+    setGenerating(true)
+    setExpandedPrompt(undefined)
+    setFranchise(undefined)
+
+    // Navigate immediately; refine after parsing
+    router.push('/categories?from=prompt=1')
+
+    let parsedExpanded: string | undefined
+    let parsedStyle: string | undefined
+    let parsedFranchise: string | undefined
+    let parsedVariants: string[] | undefined
+
+    // Background: parse prompt and possibly route to a specific catalog category
+    ;(async () => {
+      try {
+        const res = await fetch('/api/parse-prompt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt })
+        })
+        if (res.ok) {
+          const data: { productSlug?: string | null; productName?: string | null; expandedPrompt?: string; suggestedStyle?: string | null; franchise?: string | null; variants?: string[] } = await res.json()
+          if (data.expandedPrompt) { setExpandedPrompt(data.expandedPrompt); parsedExpanded = data.expandedPrompt }
+          if (data.suggestedStyle) { setStyle(data.suggestedStyle); parsedStyle = data.suggestedStyle || undefined }
+          if (data.franchise) { setFranchise(data.franchise); parsedFranchise = data.franchise || undefined } else { setFranchise(undefined) }
+          if (data.variants && Array.isArray(data.variants) && data.variants.length === 3) { setVariants(data.variants); parsedVariants = data.variants }
+          if (data.productName && data.productSlug) { setProduct(data.productSlug, data.productName) }
+
+          if (data.productName) {
+            try {
+              const catsRes = await fetch('/api/printful/categories', { cache: 'no-store' })
+              if (catsRes.ok) {
+                const cj = await catsRes.json()
+                const list: Array<{ id: number; title: string }> = (cj?.result?.categories) || []
+                const norm = (s: string) => s.toLowerCase().replace(/’/g, '').replace(/[^a-z0-9]+/g, ' ').trim()
+                const target = norm(data.productName!)
+                let hit = list.find((c) => norm(c.title) === target)
+                if (!hit) hit = list.find((c) => norm(c.title).includes(target) || target.includes(norm(c.title)))
+                if (hit) {
+                  router.replace(`/catalog/${hit.id}?from=prompt=1`)
+                }
+              }
+            } catch (_) {}
           }
-          const data: { productSlug?: string | null; productName?: string | null; expandedPrompt?: string; suggestedStyle?: string | null; franchise?: string | null } = await res.json()
-          console.debug('[hero] parse-prompt JSON (bg)', data)
-          if (data.expandedPrompt) setExpandedPrompt(data.expandedPrompt)
-          if (data.franchise) setFranchise(data.franchise)
-          else setFranchise(undefined)
-          if (data.suggestedStyle) setStyle(data.suggestedStyle)
-          if (data.productSlug && data.productName) setProduct(data.productSlug, data.productName)
-        } catch (e) {
-          console.error('[hero] parse-prompt bg error', e)
-        } finally {
-          // Parsing complete; keep banner visible a bit longer to survive navigation/paint
-          setTimeout(() => setGenerating(false), 3000)
+          // Start generation now that we have the parsed prompt and variants
+          try {
+            const genRes = await fetch('/api/generate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                prompt: prompt.trim(),
+                expandedPrompt: parsedExpanded,
+                style: parsedStyle,
+                franchise: parsedFranchise,
+                variants: parsedVariants,
+              })
+            })
+            if (genRes.ok) {
+              const gj = await genRes.json()
+              if (gj?.jobId) setLastJobId(gj.jobId)
+            } else {
+              setGenerating(false)
+            }
+          } catch (_) {
+            setGenerating(false)
+          }
         }
-      })()
-    } catch (e) {
-      console.error('[hero] onSend error', e)
-      // Already navigating; nothing else to do
-    }
+      } catch (_) {}
+    })()
   }
 
   const onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
@@ -185,14 +217,14 @@ export function Hero() {
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={onKeyDown}
               placeholder="Describe your design idea"
-              className="flex-1 min-h-[44px] max-h-40 bg-transparent text-sm placeholder:text-white/45 text-white border-0 outline-none focus:outline-none focus:ring-0 ring-0 resize-none px-2 py-2 rounded-none"
+              className="flex-1 min-h-[44px] max-h-40 bg-transparent text-sm placeholder:text-white/45 text-white border-0 outline-none focus:outline-none focus:ring-0 ring-0 resize-none px-2 py-2"
             />
 
             <button
               type="button"
               onClick={onSend}
               disabled={!prompt.trim() && attachments.length === 0}
-              className="ml-2 btn-shimmer inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-tenkai-gold via-tenkai-gold/50 to-red-500/50 text-white hover:from-tenkai-gold/30 hover:to-red-500/30 shadow-[0_8px_30px_rgba(212,175,55,0.12)]"
+              className="ml-2 btn-shimmer inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-amber-400 via-amber-400/50 to-red-500/50 text-white hover:from-amber-400/30 hover:to-red-500/30 shadow-[0_8px_30px_rgba(212,175,55,0.12)]"
             >
               <GiMagicBroom className="w-4 h-4" />
               <span className="text-lg font-semibold">Create</span>
@@ -200,15 +232,13 @@ export function Hero() {
           </div>
         </div>
 
-        {/* Removed inline generating indicator on homepage to avoid perceived lag; generation runs in background */}
-
         {/* Attachment chips */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-3 fade-in-up" style={{ animationDelay: '160ms' }}>
             {attachments.map((file, index) => (
               <div
                 key={index}
-                className="flex items-center gap-2 bg-white/[0.06] border border-white/10 text-white/80 rounded-lg px-3 py-1.5 text-xs shadow-[0_6px_20px_rgba(0,0,0,0.25)]"
+                className="flex items-center gap-2 bg-white/[0.06] border border-white/10 text-white rounded-lg px-3 py-1.5 text-xs shadow-[0_6px_20px_rgba(0,0,0,0.25)]"
               >
                 <span className="truncate max-w-[200px]">{file.name}</span>
                 <button

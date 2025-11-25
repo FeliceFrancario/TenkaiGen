@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     incomingStyleRaw = body?.style ? String(body.style) : null
     const knownProduct = incomingSlug ? PRODUCTS.find((p) => p.slug === incomingSlug) : undefined
     const knownStyle = incomingStyleRaw
-      ? STYLES.find((s) => s.toLowerCase() === incomingStyleRaw.toLowerCase())
+      ? STYLES.find((s) => s.toLowerCase() === incomingStyleRaw!.toLowerCase())
       : undefined
     if (!prompt.trim()) {
       console.warn('[parse-prompt] empty prompt, returning early')
@@ -73,6 +73,7 @@ export async function POST(req: Request) {
         suggestedStyle: knownStyle ?? null,
         franchise: null,
         expandedPrompt: prompt.trim(),
+        variants: [prompt.trim(), prompt.trim(), prompt.trim()],
       })
     }
 
@@ -84,7 +85,7 @@ export async function POST(req: Request) {
     ].filter(Boolean).join('\n')
     const systemPrompt = `
 You are a Prompt Optimizer and Workflow Router for a print-on-demand design app.
-Your job is to take a user's free-form prompt and return structured JSON that both expands the prompt into a high-quality image-generation prompt AND indicates workflow choices (product, style, franchise).
+Your job is to take a user's free-form prompt and return structured JSON that both expands the prompt into a high-quality image-generation prompt AND indicates workflow choices (product, style, franchise). You must also produce THREE prompt variants suitable for image generation to encourage stylistic diversity.
 
 Tasks:
 1. Identify the most likely product from this CLOSED SET:\n${productChoices}\nReturn its slug and name. If uncertain or none, return null for both.
@@ -92,19 +93,24 @@ Tasks:
 2. Identify if the input mentions or implies a specific franchise (anime, games, comics, etc). Examples: "One Piece", "Naruto", "Marvel".
 - If a franchise is detected, output its name in the ` + "`franchise`" + ` field.
 - If none, return null.
-This will be used to decide LoRA attachments (e.g., franchise: "One Piece" → apply One Piece LoRA).
+Note: This may be unused; still provide if clearly present.
 
 3. Suggest a style from this CLOSED SET:\n${styleChoices}\nIf the user clearly implies a style, choose it; otherwise return null.
 If style is provided in KNOWN CONTEXT, you MUST return it exactly.
 
 4. Expand and refine the user’s prompt into a polished image-generation prompt:
 - IMPORTANT: Never mention the product (t-shirt, hoodie, mug, etc.) in the expanded prompt.
-- If style = "Anime": format as danbooru-style tags (comma-separated, descriptive, detailed).
-- If style = anything else: format as natural language expansion (similar to Qwen examples).
 - Keep it under 200 words.
 - Do not include a negative prompt (workflow will handle that).
 
-5. Output MUST match the JSON schema below, no extra text.
+5. Produce THREE generation-ready prompt variants in an array called "variants". They MUST:
+- be derived from the expanded prompt, not contradict it
+- each take a different aesthetic approach (e.g., illustrative detail, minimalist vector, painterly)
+- explicitly remain "design-only" (no garment/mockup/people), on a plain white background
+- avoid mentioning the physical product
+- be concise (prefer <= 2 short sentences or concise tag lists)
+
+6. Output MUST match the JSON schema below, no extra text.
 
 KNOWN CONTEXT (may be empty):
 ${contextNotes || '(none)'}
@@ -115,7 +121,8 @@ JSON Schema:
   "productName": string | null,
   "suggestedStyle": string | null,
   "franchise": string | null,
-  "expandedPrompt": string
+  "expandedPrompt": string,
+  "variants": [string, string, string]
 }`.trim()
 
     const schema = z.object({
@@ -124,6 +131,7 @@ JSON Schema:
       suggestedStyle: z.string().nullable().describe('One of the allowed styles or null if not specified'),
       franchise: z.string().nullable().describe('Franchise name if detected; otherwise null'),
       expandedPrompt: z.string().min(1).describe('Refined detailed prompt suitable for an image generator'),
+      variants: z.array(z.string().min(1)).length(3).describe('Exactly three generation-ready prompt variants'),
     })
 
     const apiKey = process.env.LLM_API_KEY || process.env.GEMINI_API_KEY as string
@@ -275,6 +283,9 @@ JSON Schema:
       suggestedStyle: outStyle,
       franchise: (result as any).franchise ?? null,
       expandedPrompt: result.expandedPrompt,
+      variants: Array.isArray((result as any).variants) && (result as any).variants.length === 3
+        ? (result as any).variants
+        : [result.expandedPrompt, result.expandedPrompt, result.expandedPrompt],
     }
 
     if (process.env.NODE_ENV !== 'production') {
@@ -300,10 +311,11 @@ JSON Schema:
         suggestedStyle: styleMatch ?? null,
         franchise: null,
         expandedPrompt: (prompt || '').toString().trim(),
+        variants: [String(prompt || '').trim(), String(prompt || '').trim(), String(prompt || '').trim()],
       })
     } catch (inner) {
       console.error('[parse-prompt] fallback error parsing req body', inner)
-      return NextResponse.json({ productSlug: null, productName: null, suggestedStyle: null, franchise: null, expandedPrompt: '' })
+      return NextResponse.json({ productSlug: null, productName: null, suggestedStyle: null, franchise: null, expandedPrompt: '', variants: ['', '', ''] })
     }
   }
 }

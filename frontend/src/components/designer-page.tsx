@@ -35,7 +35,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   const [color] = useState<string | undefined>(fromParams('color'))
   const [size] = useState<string | undefined>(fromParams('size'))
 
-  const { isGenerating, setGenerating, setStyle: setFlowStyle, setPrompt: setFlowPrompt, setPrintArea, setDesignUrl: setFlowDesignUrl, setDesignTransform, designsByPlacement, setDesignForPlacement } = useFlow()
+  const { isGenerating, setGenerating, setStyle: setFlowStyle, setPrompt: setFlowPrompt, setPrintArea, setDesignUrl: setFlowDesignUrl, setDesignTransform, designsByPlacement, setDesignForPlacement, latestGeneratedUrls } = useFlow()
 
   // Auth state for gating confirm
   const supabase = createClient()
@@ -86,6 +86,11 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   const [prompt, setPrompt] = useState<string>('')
   const [isMoving, setIsMoving] = useState<boolean>(false)
   const [designs, setDesigns] = useState<string[]>([])
+  const [editingUrl, setEditingUrl] = useState<string | null>(null)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editPrompt, setEditPrompt] = useState<string>('')
+  const [editError, setEditError] = useState<string | null>(null)
+  const [isSubmittingEdit, setSubmittingEdit] = useState(false)
 
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const designRef = useRef<HTMLDivElement | null>(null)
@@ -306,6 +311,49 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     })()
     return () => { mounted = false }
   }, [])
+
+  // Merge realtime-generated URLs with persisted B2 designs for immediate visibility
+  const mergedDesigns = useMemo(() => {
+    const set = new Set<string>()
+    for (const u of (latestGeneratedUrls || [])) if (u) set.add(u)
+    for (const u of designs) if (u) set.add(u)
+    return Array.from(set)
+  }, [latestGeneratedUrls, designs])
+
+  const submitEdit = async () => {
+    if (!editingUrl || !editPrompt.trim()) return
+    try {
+      setSubmittingEdit(true)
+      setEditError(null)
+      const resp = await fetch(editingUrl, { cache: 'no-store' })
+      const blob = await resp.blob()
+      const toBase64 = (b: Blob) => new Promise<string>((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => resolve(String(r.result).split(',')[1] || '')
+        r.onerror = (e) => reject(e)
+        r.readAsDataURL(b)
+      })
+      const data64 = await toBase64(blob)
+      const res = await fetch('/api/generate/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: data64, prompt: editPrompt.trim() })
+      })
+      if (!res.ok) throw new Error('Edit failed')
+      const out = await res.json()
+      const newUrl = out?.result_url
+      if (newUrl) {
+        setDesigns((prev) => [newUrl, ...prev])
+      }
+      setIsEditing(false)
+      setEditingUrl(null)
+      setEditPrompt('')
+    } catch (e: any) {
+      setEditError(e?.message || 'Edit failed')
+    } finally {
+      setSubmittingEdit(false)
+    }
+  }
 
   // Load natural dimensions of the selected design to preserve aspect ratio
   useEffect(() => {
@@ -553,36 +601,122 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       setGenerating(true)
       setFlowStyle(selectedStyle || 'Standard')
       setFlowPrompt(rawPrompt)
-      // parse
-      await fetch('/api/parse-prompt', {
+      
+      // Step 1: Parse prompt
+      const parseRes = await fetch('/api/parse-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: rawPrompt, style: selectedStyle || undefined }),
-      }).catch(() => null)
-      // generate
-      await fetch('/api/generate', {
+      })
+      
+      const parseData = parseRes.ok ? await parseRes.json() : null
+      const expandedPrompt = parseData?.expandedPrompt || rawPrompt
+      
+      // Step 2: Queue generation job
+      const genRes = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          productSlug: null,
-          productName: product?.title || '',
-          variant: size || null,
-          style: selectedStyle || 'Standard',
-          color: color || null,
-          size: size || null,
-          printArea: placement.includes('back') ? 'Back' : 'Front',
           prompt: rawPrompt,
+          expandedPrompt: expandedPrompt,
+          style: selectedStyle || 'Standard',
+          franchise: parseData?.franchise || null,
+          width: 1024,
+          height: 1024,
         }),
-      }).catch(() => null)
-      // refresh designs list to include newly generated items
-      await refreshDesigns()
+      })
+      
+      if (!genRes.ok) {
+        console.error('[designer] Generation failed:', genRes.status)
+        return
+      }
+      
+      const genData = await genRes.json()
+      const jobId = genData.jobId
+      
+      if (!jobId) {
+        console.error('[designer] No job ID returned')
+        return
+      }
+      
+      console.log('[designer] Generation queued:', jobId)
+      
+      // Step 3: Poll for job completion
+      const maxPollTime = 120000 // 2 minutes max
+      const pollInterval = 2000 // 2 seconds
+      const startTime = Date.now()
+      
+      while (Date.now() - startTime < maxPollTime) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval))
+        
+        const statusRes = await fetch(`/api/generate/status/${jobId}`)
+        if (!statusRes.ok) continue
+        
+        const status = await statusRes.json()
+        console.log('[designer] Job status:', status.status)
+        
+        // Show partials if available
+        const partial = [status?.result_url, ...((status?.metadata?.extra_urls || []))].filter((u: any) => !!u && typeof u === 'string')
+        if (partial.length > 0 && !designUrl) {
+          setDesignUrl(partial[0])
+          onFitArea()
+        }
+
+        if (status.status === 'completed' && status.result_url) {
+          // Success! Set the design URL to the first result (users can choose others)
+          console.log('[designer] Generation complete:', status.result_url)
+          setDesignUrl(status.result_url)
+          onFitArea()
+          await refreshDesigns()
+          break
+        } else if (status.status === 'failed') {
+          console.error('[designer] Generation failed:', status.error)
+          alert(`Generation failed: ${status.error || 'Unknown error'}`)
+          break
+        }
+        // Otherwise keep polling (status is 'queued' or 'processing')
+      }
+      
+      // Timeout check
+      if (Date.now() - startTime >= maxPollTime) {
+        console.warn('[designer] Generation timeout')
+        alert('Generation is taking longer than expected. Check your designs list in a few minutes.')
+      }
+      
+    } catch (err) {
+      console.error('[designer] Generation error:', err)
+      alert('Failed to generate image. Please try again.')
     } finally {
       setGenerating(false)
     }
   }
 
   return (
-    <main className="min-h-[70vh] px-6 py-6 max-w-7xl mx-auto text-white">
+    <main className="min-h-[70vh] px-4 sm:px-6 lg:px-10 py-6 max-w-[1600px] mx-auto text-white">
+      {/* Live generation banner and thumbnails (realtime) */}
+      {isGenerating && (
+        <div className="mb-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-amber-200">
+          <div className="flex items-center gap-3">
+            <span className="inline-block w-4 h-4 rounded-full border-2 border-amber-200/60 border-t-white animate-spin" aria-hidden />
+            <div className="text-sm">
+              Generating your design…
+              {latestGeneratedUrls?.length ? (
+                <span className="ml-2 text-amber-100/90">{latestGeneratedUrls.length}/3 ready</span>
+              ) : null}
+            </div>
+          </div>
+          {!!latestGeneratedUrls?.length && (
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {latestGeneratedUrls.slice(0, 3).map((u) => (
+                <button key={u} onClick={() => { setDesignUrl(u); onFitArea() }} className="relative aspect-square rounded-md overflow-hidden border border-amber-400/30 bg-white/[0.02]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={u} alt="variant" className="w-full h-full object-contain" style={{ backgroundColor: 'transparent' }} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="mb-3">
         <button
           onClick={() => {
@@ -595,7 +729,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
           <span className="text-sm">Back to product</span>
         </button>
       </div>
-      <div className="grid grid-cols-[56px_320px_1fr] gap-4">
+      <div className="grid grid-cols-[72px_420px_minmax(0,1fr)] gap-5">
         {/* Vertical icon sidebar */}
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-2 flex flex-col items-center gap-2">
           <button
@@ -641,15 +775,37 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                 {isGenerating ? 'Generating…' : 'Generate'}
               </button>
               {/* Available designs from B2 */}
-              {designs.length > 0 && (
+              {mergedDesigns.length > 0 && (
                 <div>
                   <div className="text-sm text-white/60 mb-2">Your designs</div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {designs.map((u) => (
-                      <button key={u} onClick={() => { setDesignUrl(u); onFitArea(); }} className="relative aspect-square rounded-md overflow-hidden border border-white/10 hover:border-amber-400/40">
+                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-3 gap-5">
+                    {mergedDesigns.map((u, i) => (
+                      <div
+                        key={`${u}-${i}`}
+                        className="group relative aspect-[4/5] rounded-lg overflow-hidden border border-white/10 bg-[linear-gradient(45deg,rgba(255,255,255,0.06)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,0.06)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,0.06)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,0.06)_75%)] bg-[length:24px_24px] bg-[position:0_0,0_12px,12px_-12px,-12px_0]"
+                        onClick={() => { setDesignUrl(u); onFitArea(); }}
+                        role="button"
+                        aria-label="Use design"
+                      >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={u} alt="design" className="w-full h-full object-cover" />
-                      </button>
+                        <img src={u} alt="design" className="w-full h-full object-contain" style={{ backgroundColor: 'transparent' }} />
+                        {/* Shading overlay (no clicks) */}
+                        <div className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-black/30 pointer-events-none" />
+                        {/* Centered toolbar (on top, clickable) */}
+                        <div className="absolute inset-0 z-20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                          <div className="rounded-full bg-white/92 text-black backdrop-blur-md ring-1 ring-black/10 px-3 py-2 flex items-center gap-3 pointer-events-auto shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+                            <button onClick={(e) => { e.stopPropagation(); setDesignUrl(u); onFitArea(); }} className="p-2 rounded-md hover:bg-white" title="Add to product" aria-label="Add to product">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M12 5v14m-7-7h14"/></svg>
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); setEditingUrl(u); setEditPrompt(''); setIsEditing(true); }} className="p-2 rounded-md hover:bg-white" title="Edit" aria-label="Edit">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M12 20h9"/><path strokeWidth="2" d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                            </button>
+                            <button onClick={async (e) => { e.stopPropagation(); try { const resp = await fetch('/api/designs/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: u }) }); if (resp.ok) { setDesigns((prev) => prev.filter((x) => x !== u)) } } catch {} }} className="p-2 rounded-md hover:bg-white" title="Delete" aria-label="Delete">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M3 6h18"/><path strokeWidth="2" d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path strokeWidth="2" d="M10 11v6M14 11v6"/><path strokeWidth="2" d="M9 6V4a2 2 0 012-2h2a2 2 0 012 2v2"/></svg>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -734,7 +890,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
           <div className="mt-3 relative overflow-auto">
             <div
               ref={canvasRef}
-              className="relative mx-auto max-w-[900px]"
+              className="relative mx-auto max-w-[1200px]"
               style={{
                 backgroundColor: (canvasBg as string | undefined) || (layoutTemplate?.backgroundColor as string | undefined) || undefined,
                 backgroundImage: layoutTemplate?.backgroundUrl ? `url(${layoutTemplate.backgroundUrl})` : undefined,
@@ -775,6 +931,41 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       </div>
 
       {/* Auth prompt modal */}
+      {isEditing && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="w-full max-w-4xl rounded-xl border border-white/10 bg-[#0b0b0b] text-white overflow-hidden">
+            <div className="flex items-center justify-between p-3 border-b border-white/10">
+              <div className="font-medium">Edit Image</div>
+              <button onClick={() => setIsEditing(false)} className="text-white/70 hover:text-white">✕</button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-0">
+              <div className="p-3 border-b md:border-b-0 md:border-r border-white/10">
+                {editingUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={editingUrl} alt="Editing" className="w-full h-[360px] object-contain" />
+                )}
+              </div>
+              <div className="p-3">
+                <label className="text-sm text-white/70">Describe the edit</label>
+                <textarea
+                  value={editPrompt}
+                  onChange={(e) => setEditPrompt(e.target.value)}
+                  rows={8}
+                  placeholder="e.g., Increase line contrast and remove stray marks near the edges"
+                  className="w-full mt-2 rounded-lg bg-white/[0.04] border border-white/10 p-2 outline-none"
+                />
+                {editError && <div className="text-rose-300 text-xs mt-2">{editError}</div>}
+                <div className="mt-3 flex items-center gap-2">
+                  <button disabled={isSubmittingEdit || !editPrompt.trim()} onClick={submitEdit} className="px-3 py-2 rounded bg-blue-500 hover:bg-blue-600 disabled:opacity-50">
+                    {isSubmittingEdit ? 'Applying…' : 'Apply edit'}
+                  </button>
+                  <button onClick={() => setIsEditing(false)} className="px-3 py-2 rounded border border-white/15">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {showAuthPrompt && !userEmail && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
           <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/[0.06] p-5">
