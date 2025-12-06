@@ -221,13 +221,13 @@ export default function PromptClient({ slug }: { slug: string }) {
     if (!p) return
     setPrompt(p)
     if (!isGenerating) setGenerating(true)
-    try {
+      try {
       // Clear stale franchise before parsing anew
       setFranchise(undefined)
       const res = await fetch('/api/parse-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: p }),
+          body: JSON.stringify({ prompt: p, productSlug: product.slug, style }),
       })
       if (res.ok) {
         const data: { expandedPrompt?: string; franchise?: string | null; suggestedStyle?: string | null } = await res.json()

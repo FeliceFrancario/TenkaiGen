@@ -7,8 +7,8 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 // Google Gemini
 const GEMINI_API_KEY = process.env.GEMINI_GENAI_API_KEY || process.env.GOOGLE_GENAI_API_KEY || process.env.GEMINI_API_KEY
 const GEMINI_MODEL_ID = 'gemini-3-pro-image-preview'
-// Default to DIRECT mode to improve responsiveness and reliability
-const GEMINI_USE_BATCH = String(process.env.GEMINI_USE_BATCH ?? '0').toLowerCase() === '1'
+// Force DIRECT mode to improve responsiveness and reliability (disable batch regardless of env)
+const GEMINI_USE_BATCH = false
 const GEMINI_BATCH_MODEL_ID = process.env.GEMINI_BATCH_MODEL_ID || 'gemini-2.5-flash-image'
 
 // B2 S3 config
