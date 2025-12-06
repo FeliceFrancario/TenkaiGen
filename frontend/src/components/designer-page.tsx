@@ -5,7 +5,7 @@ import Image from 'next/image'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useFlow } from '@/components/flow-provider'
 import { STYLES } from '@/lib/styles'
-import { Sparkles, Upload, Type as TypeIcon, ArrowLeft } from 'lucide-react'
+import { Sparkles, Upload, Type as TypeIcon, ArrowLeft, Pencil } from 'lucide-react'
 import { createClient } from '@/lib/supabase/browser'
 
 // Removed Printful logo constant
@@ -92,6 +92,55 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   const [editError, setEditError] = useState<string | null>(null)
   const [isSubmittingEdit, setSubmittingEdit] = useState(false)
 
+  // Background removal modal state
+  const [showBgPrompt, setShowBgPrompt] = useState(false)
+  const [bgTargetUrl, setBgTargetUrl] = useState<string | null>(null)
+  const [bgTolerance, setBgTolerance] = useState<number>(245)
+  const [bgIsProcessing, setBgIsProcessing] = useState(false)
+  const [bgError, setBgError] = useState<string | null>(null)
+  const [bgResultUrl, setBgResultUrl] = useState<string | null>(null)
+
+  const openAddToProduct = (url: string) => {
+    setBgTargetUrl(url)
+    setBgTolerance(245)
+    setBgError(null)
+    setBgIsProcessing(false)
+    setBgResultUrl(null)
+    setShowBgPrompt(true)
+  }
+  const confirmKeepBackground = () => {
+    if (!bgTargetUrl) return
+    setDesignUrl(bgTargetUrl)
+    onFitArea()
+    setShowBgPrompt(false)
+  }
+  const confirmRemoveBackground = async () => {
+    if (!bgTargetUrl) return
+    try {
+      setBgIsProcessing(true)
+      setBgError(null)
+      const res = await fetch('/api/images/remove-bg', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: bgTargetUrl, threshold: bgTolerance }),
+      })
+      if (!res.ok) {
+        const t = await res.text().catch(() => '')
+        throw new Error(t || 'Failed to remove background')
+      }
+      const j = await res.json()
+      const baseUrl = j?.url || null
+      const signedUrl = j?.signedUrl || null
+      // Do NOT mutate signed URLs; add cache-buster only to unsigned
+      const previewUrl = signedUrl || (baseUrl ? `${baseUrl}?t=${Date.now()}` : null)
+      console.log('[remove-bg] result', { baseUrl, signedUrl, previewUrl, from: bgTargetUrl, threshold: bgTolerance })
+      setBgResultUrl(previewUrl || null)
+    } catch (e: any) {
+      setBgError(e?.message || 'Failed to remove background')
+    } finally {
+      setBgIsProcessing(false)
+    }
+  }
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const designRef = useRef<HTMLDivElement | null>(null)
 
@@ -783,7 +832,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                       <div
                         key={`${u}-${i}`}
                         className="group relative aspect-[4/5] rounded-lg overflow-hidden border border-white/10 bg-[linear-gradient(45deg,rgba(255,255,255,0.06)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,0.06)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,0.06)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,0.06)_75%)] bg-[length:24px_24px] bg-[position:0_0,0_12px,12px_-12px,-12px_0]"
-                        onClick={() => { setDesignUrl(u); onFitArea(); }}
+                        onClick={() => { openAddToProduct(u) }}
                         role="button"
                         aria-label="Use design"
                       >
@@ -794,7 +843,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                         {/* Centered toolbar (on top, clickable) */}
                         <div className="absolute inset-0 z-20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                           <div className="rounded-full bg-white/92 text-black backdrop-blur-md ring-1 ring-black/10 px-3 py-2 flex items-center gap-3 pointer-events-auto shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
-                            <button onClick={(e) => { e.stopPropagation(); setDesignUrl(u); onFitArea(); }} className="p-2 rounded-md hover:bg-white" title="Add to product" aria-label="Add to product">
+                            <button onClick={(e) => { e.stopPropagation(); openAddToProduct(u) }} className="p-2 rounded-md hover:bg-white" title="Add to product" aria-label="Add to product">
                               <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M12 5v14m-7-7h14"/></svg>
                             </button>
                             <button onClick={(e) => { e.stopPropagation(); setEditingUrl(u); setEditPrompt(''); setIsEditing(true); }} className="p-2 rounded-md hover:bg-white" title="Edit" aria-label="Edit">
@@ -924,6 +973,17 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                 ) : (
                   <div className="w-full h-full grid place-items-center text-xs text-white/50">Pick a design</div>
                 )}
+                {/* Floating edit button over the design */}
+                {designUrl && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setEditingUrl(designUrl); setEditPrompt(''); setIsEditing(true) }}
+                    className="absolute -top-3 -right-3 z-10 w-8 h-8 rounded-full bg-white text-black shadow-md flex items-center justify-center border border-black/10"
+                    title="Edit"
+                    aria-label="Edit"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -945,21 +1005,119 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                   <img src={editingUrl} alt="Editing" className="w-full h-[360px] object-contain" />
                 )}
               </div>
-              <div className="p-3">
-                <label className="text-sm text-white/70">Describe the edit</label>
-                <textarea
-                  value={editPrompt}
-                  onChange={(e) => setEditPrompt(e.target.value)}
-                  rows={8}
-                  placeholder="e.g., Increase line contrast and remove stray marks near the edges"
-                  className="w-full mt-2 rounded-lg bg-white/[0.04] border border-white/10 p-2 outline-none"
-                />
-                {editError && <div className="text-rose-300 text-xs mt-2">{editError}</div>}
-                <div className="mt-3 flex items-center gap-2">
-                  <button disabled={isSubmittingEdit || !editPrompt.trim()} onClick={submitEdit} className="px-3 py-2 rounded bg-blue-500 hover:bg-blue-600 disabled:opacity-50">
-                    {isSubmittingEdit ? 'Applying…' : 'Apply edit'}
-                  </button>
-                  <button onClick={() => setIsEditing(false)} className="px-3 py-2 rounded border border-white/15">Cancel</button>
+              <div className="p-3 space-y-4">
+                <div>
+                  <label className="text-sm text-white/70">Describe the edit (AI)</label>
+                  <textarea
+                    value={editPrompt}
+                    onChange={(e) => setEditPrompt(e.target.value)}
+                    rows={5}
+                    placeholder="e.g., clean stray edges, increase contrast, refine lines"
+                    className="w-full mt-2 rounded-lg bg-white/[0.04] border border-white/10 p-2 outline-none"
+                  />
+                  <div className="mt-2 flex items-center gap-2">
+                    <button disabled={isSubmittingEdit || !editPrompt.trim()} onClick={submitEdit} className="px-3 py-2 rounded bg-blue-500 hover:bg-blue-600 disabled:opacity-50">
+                      {isSubmittingEdit ? 'Applying…' : 'Apply AI edit'}
+                    </button>
+                  </div>
+                </div>
+                <div className="border-t border-white/10 pt-3">
+                  <div className="text-sm text-white/80 mb-1">Background removal tolerance</div>
+                  <input
+                    type="range"
+                    min={200}
+                    max={255}
+                    step={1}
+                    value={bgTolerance}
+                    onChange={(e) => setBgTolerance(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <div className="text-xs text-white/60 mt-1">Tolerance: {bgTolerance}</div>
+                  <div className="mt-2">
+                    <button
+                      onClick={async () => {
+                        if (!editingUrl) return
+                        try {
+                          setBgIsProcessing(true)
+                          setBgError(null)
+                          const res = await fetch('/api/images/remove-bg', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url: editingUrl, threshold: bgTolerance }),
+                          })
+                          if (res.ok) {
+                            const j = await res.json()
+                            const outUrl = j?.url || null
+                            if (outUrl) {
+                              setDesignUrl(outUrl)
+                              // refresh preview
+                              setEditingUrl(outUrl)
+                            }
+                          }
+                        } catch (e: any) {
+                          setBgError(e?.message || 'Failed')
+                        } finally {
+                          setBgIsProcessing(false)
+                        }
+                      }}
+                      disabled={bgIsProcessing}
+                      className="px-3 py-2 rounded-md bg-white text-black hover:opacity-90"
+                    >
+                      {bgIsProcessing ? 'Processing…' : 'Apply remove background'}
+                    </button>
+                  </div>
+                </div>
+                <div className="border-t border-white/10 pt-3">
+                  <div className="text-sm text-white/80 mb-2">Post-processing filters</div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      ['sharpen','Sharpen'],
+                      ['normalize','Normalize'],
+                      ['grayscale','Grayscale'],
+                      ['invert','Invert'],
+                      ['blur','Light blur'],
+                      ['saturation_plus','Saturation +'],
+                      ['saturation_minus','Saturation -'],
+                      ['tint_warm','Warm tint'],
+                      ['tint_cool','Cool tint'],
+                    ].map(([key,label]) => (
+                      <button
+                        key={key}
+                        onClick={async () => {
+                          if (!editingUrl) return
+                          try {
+                            setBgIsProcessing(true)
+                            setBgError(null)
+                            const res = await fetch('/api/images/postprocess', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ url: editingUrl, operations: [key] }),
+                            })
+                            if (res.ok) {
+                              const j = await res.json()
+                              const outUrl = j?.url || null
+                              if (outUrl) {
+                                setDesignUrl(outUrl)
+                                setEditingUrl(outUrl)
+                              }
+                            }
+                          } catch (e: any) {
+                            setBgError(e?.message || 'Failed')
+                          } finally {
+                            setBgIsProcessing(false)
+                          }
+                        }}
+                        className="px-2 py-1.5 text-xs rounded-md border border-white/10 hover:bg-white/[0.06]"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {editError && <div className="text-rose-300 text-xs">{editError}</div>}
+                {bgError && <div className="text-rose-300 text-xs">{bgError}</div>}
+                <div className="pt-2 flex items-center gap-2">
+                  <button onClick={() => setIsEditing(false)} className="px-3 py-2 rounded border border-white/15">Close</button>
                 </div>
               </div>
             </div>
@@ -975,6 +1133,80 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
               <a href={`/signin?returnUrl=${encodeURIComponent(`/designer/${productId}/finalize`)}`} className="px-4 py-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition text-sm">Sign In</a>
               <a href={`/signup?returnUrl=${encodeURIComponent(`/designer/${productId}/finalize`)}`} className="px-4 py-2 rounded-full bg-white text-black hover:opacity-90 transition text-sm">Sign Up</a>
               <button onClick={() => setShowAuthPrompt(false)} className="ml-auto px-3 py-1.5 rounded-md border border-white/10 text-white/70 text-xs">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showBgPrompt && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#0b0b0b] text-white overflow-hidden">
+            <div className="flex items-center justify-between p-3 border-b border-white/10">
+              <div className="font-medium">Add to product</div>
+              <button onClick={() => setShowBgPrompt(false)} className="text-white/70 hover:text-white">✕</button>
+            </div>
+            <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+                {(bgResultUrl || bgTargetUrl) ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={bgResultUrl || bgTargetUrl!}
+                    src={bgResultUrl || bgTargetUrl!}
+                    alt="preview"
+                    className="w-full h-[320px] object-contain"
+                    onError={() => setBgError(`Preview failed to load: ${bgResultUrl || bgTargetUrl}`)}
+                  />
+                ) : (
+                  <div className="w-full h-[320px] grid place-items-center text-xs text-white/60">No preview</div>
+                )}
+                {(bgResultUrl || bgTargetUrl) && (
+                  <div className="mt-2 text-[11px] text-white/60 break-all">
+                    Preview URL: {bgResultUrl || bgTargetUrl}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="text-sm text-white/80 mb-2">Remove white background?</div>
+                <div className="text-xs text-white/60 mb-3">Choose tolerance (higher removes more near-white).</div>
+                <input
+                  type="range"
+                  min={200}
+                  max={255}
+                  step={1}
+                  value={bgTolerance}
+                  onChange={(e) => setBgTolerance(Number(e.target.value))}
+                  className="w-full"
+                />
+                <div className="text-xs text-white/60 mt-1">Tolerance: {bgTolerance}</div>
+                {bgError && <div className="text-rose-300 text-xs mt-2">{bgError}</div>}
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={confirmKeepBackground}
+                    disabled={bgIsProcessing}
+                    className="px-3 py-2 rounded-md border border-white/15 hover:bg-white/[0.06]"
+                  >
+                    Keep background
+                  </button>
+                  <button
+                    onClick={confirmRemoveBackground}
+                    disabled={bgIsProcessing}
+                    className="px-3 py-2 rounded-md bg-white text-black hover:opacity-90"
+                  >
+                    {bgIsProcessing ? 'Processing…' : 'Remove background'}
+                  </button>
+                  {!!bgResultUrl && (
+                    <button
+                      onClick={() => {
+                        setDesignUrl(bgResultUrl)
+                        onFitArea()
+                        setShowBgPrompt(false)
+                      }}
+                      className="px-3 py-2 rounded-md bg-amber-300 text-black hover:bg-amber-200"
+                    >
+                      Add to product
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>

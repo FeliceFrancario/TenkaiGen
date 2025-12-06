@@ -108,7 +108,6 @@ If style is provided in KNOWN CONTEXT, you MUST return it exactly.
 - each take a different aesthetic approach (e.g., illustrative detail, minimalist vector, painterly)
 - explicitly remain "design-only" (no garment/mockup/people), on a plain white background
 - avoid mentioning the physical product
-- be concise (prefer <= 2 short sentences or concise tag lists)
 
 6. Output MUST match the JSON schema below, no extra text.
 
