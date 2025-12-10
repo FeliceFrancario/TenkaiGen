@@ -79,6 +79,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
 
   // Design state (single image for now)
   const [designUrl, setDesignUrl] = useState<string>('')
+  const [designOriginalUrl, setDesignOriginalUrl] = useState<string | null>(null) // original generated/baseline image
   const [designDims, setDesignDims] = useState<{ w: number; h: number } | null>(null)
   const [designRect, setDesignRect] = useState<{ x: number; y: number; w: number; h: number; r: number }>({ x: 0, y: 0, w: 0, h: 0, r: 0 })
   const [activeTab, setActiveTab] = useState<'ai' | 'uploads' | 'text'>('ai')
@@ -86,7 +87,10 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   const [prompt, setPrompt] = useState<string>('')
   const [isMoving, setIsMoving] = useState<boolean>(false)
   const [designs, setDesigns] = useState<string[]>([])
+  const [editingBaseUrl, setEditingBaseUrl] = useState<string | null>(null) // keep original for tolerance re-runs
+  const [editingOriginalUrl, setEditingOriginalUrl] = useState<string | null>(null) // original generated image baseline
   const [editingUrl, setEditingUrl] = useState<string | null>(null)
+  const [appliedDesignUrl, setAppliedDesignUrl] = useState<string | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [editPrompt, setEditPrompt] = useState<string>('')
   const [editError, setEditError] = useState<string | null>(null)
@@ -99,6 +103,152 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   const [bgIsProcessing, setBgIsProcessing] = useState(false)
   const [bgError, setBgError] = useState<string | null>(null)
   const [bgResultUrl, setBgResultUrl] = useState<string | null>(null)
+  const [editTab, setEditTab] = useState<'adjust' | 'filters' | 'remove' | 'ai'>('adjust')
+  const [isPreviewing, setIsPreviewing] = useState(false)
+  const [filterLoading, setFilterLoading] = useState(false)
+  const [filterPreviews, setFilterPreviews] = useState<Record<string, string>>({})
+  const [adjustments, setAdjustments] = useState({
+    exposure: 0,
+    contrast: 0,
+    highlights: 0,
+    shadows: 0,
+    saturation: 0,
+    vibrance: 0,
+    warmth: 0,
+    tint: 0,
+    rotateDeg: 0,
+    flipH: false,
+    flipV: false,
+  })
+
+  const startEditing = (url: string) => {
+    const original = designOriginalUrl || url
+    setDesignOriginalUrl((prev) => prev || url)
+    setEditingBaseUrl(original)
+    setEditingOriginalUrl(original)
+    setEditingUrl(url)
+    setAppliedDesignUrl(designUrl || url)
+    setEditPrompt('')
+    setEditError(null)
+    setBgError(null)
+    setBgIsProcessing(false)
+    setBgTolerance(245)
+    setIsEditing(true)
+  }
+
+  const applyCurrentEdit = () => {
+    if (!editingUrl) return
+    setDesignUrl(editingUrl)
+    setAppliedDesignUrl(editingUrl)
+    onFitArea()
+    setIsEditing(false)
+  }
+
+  const resetEditing = () => {
+    if (!editingOriginalUrl) return
+    setEditingUrl(editingOriginalUrl)
+    setBgError(null)
+    setEditError(null)
+    setBgTolerance(245)
+    setBgIsProcessing(false)
+  }
+
+  const resetToApplied = () => {
+    if (!appliedDesignUrl) return
+    setEditingUrl(appliedDesignUrl)
+    setBgError(null)
+    setEditError(null)
+  }
+
+  const runPostprocessPreview = async (ops: any[]) => {
+    const source = editingOriginalUrl || editingUrl || editingBaseUrl || designOriginalUrl || designUrl
+    if (!source) return
+    try {
+      setIsPreviewing(true)
+      setBgError(null)
+      const res = await fetch('/api/images/postprocess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: source, operations: ops }),
+      })
+      if (!res.ok) {
+        const t = await res.text().catch(() => '')
+        throw new Error(t || 'Failed to apply')
+      }
+      const j = await res.json()
+      const baseUrl = j?.url || null
+      const signedUrl = j?.signedUrl || null
+      const preview = signedUrl || (baseUrl ? `${baseUrl}?t=${Date.now()}` : null)
+      if (preview) {
+        setEditingUrl(preview)
+      }
+    } catch (e: any) {
+      setBgError(e?.message || 'Failed')
+    } finally {
+      setIsPreviewing(false)
+    }
+  }
+
+  const runAdjustPreview = async () => {
+    const ops: any[] = [{
+      type: 'adjust',
+      exposure: adjustments.exposure,
+      contrast: adjustments.contrast,
+      highlights: adjustments.highlights,
+      shadows: adjustments.shadows,
+      saturation: adjustments.saturation,
+      vibrance: adjustments.vibrance,
+      warmth: adjustments.warmth,
+      hue: adjustments.tint,
+    }]
+    if (adjustments.rotateDeg) ops.push({ type: 'rotate', degrees: adjustments.rotateDeg })
+    if (adjustments.flipH || adjustments.flipV) ops.push({ type: 'flip', horizontal: adjustments.flipH, vertical: adjustments.flipV })
+    await runPostprocessPreview(ops)
+  }
+
+  const filterDefs = [
+    { key: 'original', label: 'Original', ops: [] },
+    { key: 'vivid', label: 'Vivid', ops: [{ type: 'adjust', saturation: 18, contrast: 10 }] },
+    { key: 'warm', label: 'Warm', ops: [{ type: 'adjust', warmth: 22 }] },
+    { key: 'cool', label: 'Cool', ops: [{ type: 'adjust', warmth: -22 }] },
+    { key: 'mono', label: 'Mono', ops: ['grayscale'] },
+    { key: 'film', label: 'Film', ops: ['normalize', { type: 'adjust', warmth: 8, contrast: 8, saturation: -10 }] },
+    { key: 'fade', label: 'Fade', ops: [{ type: 'adjust', contrast: -12, saturation: -8 }] },
+  ]
+
+  const generateFilterPreviews = async () => {
+    const source = editingOriginalUrl || editingUrl || editingBaseUrl || designOriginalUrl || designUrl
+    if (!source) return
+    setFilterLoading(true)
+    try {
+      const entries = await Promise.all(filterDefs.filter(f => f.key !== 'original').map(async (f) => {
+        const res = await fetch('/api/images/postprocess', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: source, operations: f.ops }),
+        })
+        if (!res.ok) return [f.key, null] as const
+        const j = await res.json()
+        const baseUrl = j?.url || null
+        const signedUrl = j?.signedUrl || null
+        const preview = signedUrl || (baseUrl ? `${baseUrl}?t=${Date.now()}` : null)
+        return [f.key, preview] as const
+      }))
+      const map: Record<string, string> = {}
+      for (const [k, v] of entries) if (v) map[k] = v
+      setFilterPreviews(map)
+    } catch (e) {
+      console.warn('filter previews failed', e)
+    } finally {
+      setFilterLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (editTab === 'filters' && Object.keys(filterPreviews).length === 0 && !filterLoading) {
+      generateFilterPreviews()
+    }
+  }, [editTab, filterPreviews, filterLoading])
 
   const openAddToProduct = (url: string) => {
     setBgTargetUrl(url)
@@ -110,6 +260,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   }
   const confirmKeepBackground = () => {
     if (!bgTargetUrl) return
+    setDesignOriginalUrl((prev) => prev || bgTargetUrl)
     setDesignUrl(bgTargetUrl)
     onFitArea()
     setShowBgPrompt(false)
@@ -134,6 +285,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       // Do NOT mutate signed URLs; add cache-buster only to unsigned
       const previewUrl = signedUrl || (baseUrl ? `${baseUrl}?t=${Date.now()}` : null)
       console.log('[remove-bg] result', { baseUrl, signedUrl, previewUrl, from: bgTargetUrl, threshold: bgTolerance })
+      setDesignOriginalUrl((prev) => prev || bgTargetUrl)
       setBgResultUrl(previewUrl || null)
     } catch (e: any) {
       setBgError(e?.message || 'Failed to remove background')
@@ -363,9 +515,14 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
 
   // Merge realtime-generated URLs with persisted B2 designs for immediate visibility
   const mergedDesigns = useMemo(() => {
+    const isModified = (u: string) => /_alpha\.png\b|_pp_/i.test(u)
     const set = new Set<string>()
     for (const u of (latestGeneratedUrls || [])) if (u) set.add(u)
-    for (const u of designs) if (u) set.add(u)
+    for (const u of designs) {
+      if (!u) continue
+      if (isModified(u)) continue
+      set.add(u)
+    }
     return Array.from(set)
   }, [latestGeneratedUrls, designs])
 
@@ -392,11 +549,9 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       const out = await res.json()
       const newUrl = out?.result_url
       if (newUrl) {
-        setDesigns((prev) => [newUrl, ...prev])
+        // Keep the edit in-session; do not add to stack unless user later saves as new
+        setEditingUrl(newUrl)
       }
-      setIsEditing(false)
-      setEditingUrl(null)
-      setEditPrompt('')
     } catch (e: any) {
       setEditError(e?.message || 'Edit failed')
     } finally {
@@ -459,6 +614,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     const saved = designsByPlacement[key]
     if (saved?.url) {
       setDesignUrl(saved.url)
+      setDesignOriginalUrl((prev) => prev || saved.url)
       const tpl = getTemplate(placement)
       if (tpl && saved.transform) {
         const x = tpl.x + Math.round((saved.transform.x || 0) * tpl.width)
@@ -708,6 +864,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
         const partial = [status?.result_url, ...((status?.metadata?.extra_urls || []))].filter((u: any) => !!u && typeof u === 'string')
         if (partial.length > 0 && !designUrl) {
           setDesignUrl(partial[0])
+          setDesignOriginalUrl((prev) => prev || partial[0])
           onFitArea()
         }
 
@@ -715,6 +872,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
           // Success! Set the design URL to the first result (users can choose others)
           console.log('[designer] Generation complete:', status.result_url)
           setDesignUrl(status.result_url)
+          setDesignOriginalUrl((prev) => prev || status.result_url)
           onFitArea()
           await refreshDesigns()
           break
@@ -757,7 +915,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
           {!!latestGeneratedUrls?.length && (
             <div className="mt-3 grid grid-cols-3 gap-2">
               {latestGeneratedUrls.slice(0, 3).map((u) => (
-                <button key={u} onClick={() => { setDesignUrl(u); onFitArea() }} className="relative aspect-square rounded-md overflow-hidden border border-amber-400/30 bg-white/[0.02]">
+                <button key={u} onClick={() => { setDesignUrl(u); setDesignOriginalUrl((prev) => prev || u); onFitArea() }} className="relative aspect-square rounded-md overflow-hidden border border-amber-400/30 bg-white/[0.02]">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={u} alt="variant" className="w-full h-full object-contain" style={{ backgroundColor: 'transparent' }} />
                 </button>
@@ -846,7 +1004,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                             <button onClick={(e) => { e.stopPropagation(); openAddToProduct(u) }} className="p-2 rounded-md hover:bg-white" title="Add to product" aria-label="Add to product">
                               <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M12 5v14m-7-7h14"/></svg>
                             </button>
-                            <button onClick={(e) => { e.stopPropagation(); setEditingUrl(u); setEditPrompt(''); setIsEditing(true); }} className="p-2 rounded-md hover:bg-white" title="Edit" aria-label="Edit">
+                            <button onClick={(e) => { e.stopPropagation(); startEditing(u) }} className="p-2 rounded-md hover:bg-white" title="Edit" aria-label="Edit">
                               <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" d="M12 20h9"/><path strokeWidth="2" d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                             </button>
                             <button onClick={async (e) => { e.stopPropagation(); try { const resp = await fetch('/api/designs/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: u }) }); if (resp.ok) { setDesigns((prev) => prev.filter((x) => x !== u)) } } catch {} }} className="p-2 rounded-md hover:bg-white" title="Delete" aria-label="Delete">
@@ -976,7 +1134,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                 {/* Floating edit button over the design */}
                 {designUrl && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); setEditingUrl(designUrl); setEditPrompt(''); setIsEditing(true) }}
+                    onClick={(e) => { e.stopPropagation(); startEditing(designUrl) }}
                     className="absolute -top-3 -right-3 z-10 w-8 h-8 rounded-full bg-white text-black shadow-md flex items-center justify-center border border-black/10"
                     title="Edit"
                     aria-label="Edit"
@@ -1006,99 +1164,158 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                 )}
               </div>
               <div className="p-3 space-y-4">
-                <div>
-                  <label className="text-sm text-white/70">Describe the edit (AI)</label>
-                  <textarea
-                    value={editPrompt}
-                    onChange={(e) => setEditPrompt(e.target.value)}
-                    rows={5}
-                    placeholder="e.g., clean stray edges, increase contrast, refine lines"
-                    className="w-full mt-2 rounded-lg bg-white/[0.04] border border-white/10 p-2 outline-none"
-                  />
-                  <div className="mt-2 flex items-center gap-2">
-                    <button disabled={isSubmittingEdit || !editPrompt.trim()} onClick={submitEdit} className="px-3 py-2 rounded bg-blue-500 hover:bg-blue-600 disabled:opacity-50">
-                      {isSubmittingEdit ? 'Applying…' : 'Apply AI edit'}
-                    </button>
-                  </div>
-                </div>
-                <div className="border-t border-white/10 pt-3">
-                  <div className="text-sm text-white/80 mb-1">Background removal tolerance</div>
-                  <input
-                    type="range"
-                    min={200}
-                    max={255}
-                    step={1}
-                    value={bgTolerance}
-                    onChange={(e) => setBgTolerance(Number(e.target.value))}
-                    className="w-full"
-                  />
-                  <div className="text-xs text-white/60 mt-1">Tolerance: {bgTolerance}</div>
-                  <div className="mt-2">
+                <div className="flex gap-2 text-sm">
+                  {[
+                    ['adjust','Adjust'],
+                    ['filters','Filters'],
+                    ['remove','Remove BG'],
+                    ['ai','AI Edit'],
+                  ].map(([key,label]) => (
                     <button
-                      onClick={async () => {
-                        if (!editingUrl) return
-                        try {
-                          setBgIsProcessing(true)
-                          setBgError(null)
-                          const res = await fetch('/api/images/remove-bg', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: editingUrl, threshold: bgTolerance }),
-                          })
-                          if (res.ok) {
-                            const j = await res.json()
-                            const outUrl = j?.url || null
-                            if (outUrl) {
-                              setDesignUrl(outUrl)
-                              // refresh preview
-                              setEditingUrl(outUrl)
-                            }
-                          }
-                        } catch (e: any) {
-                          setBgError(e?.message || 'Failed')
-                        } finally {
-                          setBgIsProcessing(false)
-                        }
-                      }}
-                      disabled={bgIsProcessing}
-                      className="px-3 py-2 rounded-md bg-white text-black hover:opacity-90"
+                      key={key}
+                      onClick={() => setEditTab(key as any)}
+                      className={`px-3 py-1.5 rounded-lg border text-xs ${editTab===key ? 'border-amber-400/60 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'}`}
                     >
-                      {bgIsProcessing ? 'Processing…' : 'Apply remove background'}
+                      {label}
                     </button>
-                  </div>
+                  ))}
                 </div>
-                <div className="border-t border-white/10 pt-3">
-                  <div className="text-sm text-white/80 mb-2">Post-processing filters</div>
-                  <div className="flex flex-wrap gap-2">
+
+                {editTab === 'adjust' && (
+                  <div className="space-y-3">
                     {[
-                      ['sharpen','Sharpen'],
-                      ['normalize','Normalize'],
-                      ['grayscale','Grayscale'],
-                      ['invert','Invert'],
-                      ['blur','Light blur'],
-                      ['saturation_plus','Saturation +'],
-                      ['saturation_minus','Saturation -'],
-                      ['tint_warm','Warm tint'],
-                      ['tint_cool','Cool tint'],
-                    ].map(([key,label]) => (
+                      ['Exposure','exposure',-50,50],
+                      ['Contrast','contrast',-50,50],
+                      ['Highlights','highlights',-50,50],
+                      ['Shadows','shadows',-50,50],
+                      ['Saturation','saturation',-50,50],
+                      ['Vibrance','vibrance',-50,50],
+                      ['Warmth','warmth',-50,50],
+                      ['Tint (Hue)','tint',-50,50],
+                    ].map(([label,key,min,max]) => (
+                      <div key={key as string}>
+                        <div className="flex justify-between text-xs text-white/70 mb-1">
+                          <span>{label}</span>
+                          <span>{(adjustments as any)[key as string]}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={min as number}
+                          max={max as number}
+                          step={1}
+                          value={(adjustments as any)[key as string]}
+                          onChange={(e) => setAdjustments((a) => ({ ...a, [key as string]: Number(e.target.value) }))}
+                          className="w-full"
+                        />
+                      </div>
+                    ))}
+                    <div>
+                      <div className="flex justify-between text-xs text-white/70 mb-1">
+                        <span>Rotate</span>
+                        <span>{adjustments.rotateDeg}°</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={-30}
+                        max={30}
+                        step={1}
+                        value={adjustments.rotateDeg}
+                        onChange={(e) => setAdjustments((a) => ({ ...a, rotateDeg: Number(e.target.value) }))}
+                        className="w-full"
+                      />
+                      <div className="flex gap-2 mt-2 text-xs">
+                        <button onClick={() => setAdjustments((a) => ({ ...a, rotateDeg: a.rotateDeg - 90 }))} className="px-2 py-1 rounded border border-white/10 hover:bg-white/[0.06]">-90°</button>
+                        <button onClick={() => setAdjustments((a) => ({ ...a, rotateDeg: 0 }))} className="px-2 py-1 rounded border border-white/10 hover:bg-white/[0.06]">Reset</button>
+                        <button onClick={() => setAdjustments((a) => ({ ...a, rotateDeg: a.rotateDeg + 90 }))} className="px-2 py-1 rounded border border-white/10 hover:bg-white/[0.06]">+90°</button>
+                      </div>
+                      <div className="flex gap-2 mt-2 text-xs">
+                        <button onClick={() => setAdjustments((a) => ({ ...a, flipH: !a.flipH }))} className={`px-3 py-1 rounded border ${adjustments.flipH ? 'border-amber-400/60 bg-white/[0.10]' : 'border-white/10 hover:bg-white/[0.06]'}`}>Flip H</button>
+                        <button onClick={() => setAdjustments((a) => ({ ...a, flipV: !a.flipV }))} className={`px-3 py-1 rounded border ${adjustments.flipV ? 'border-amber-400/60 bg-white/[0.10]' : 'border-white/10 hover:bg-white/[0.06]'}`}>Flip V</button>
+                      </div>
+                    </div>
+                    <div className="pt-1">
                       <button
-                        key={key}
+                        onClick={runAdjustPreview}
+                        disabled={isPreviewing}
+                        className="px-3 py-2 rounded bg-white text-black hover:opacity-90 disabled:opacity-60"
+                      >
+                        {isPreviewing ? 'Previewing…' : 'Preview adjustments'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {editTab === 'filters' && (
+                  <div className="space-y-3">
+                    <div className="text-sm text-white/80">Filters</div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {filterDefs.map((f) => {
+                        const preview = f.key === 'original'
+                          ? (editingOriginalUrl || editingUrl || editingBaseUrl || designOriginalUrl || designUrl)
+                          : filterPreviews[f.key]
+                        return (
+                          <button
+                            key={f.key}
+                            onClick={async () => {
+                              if (f.key === 'original') {
+                                resetEditing()
+                              } else {
+                                await runPostprocessPreview(f.ops as any[])
+                              }
+                            }}
+                            className="rounded-lg overflow-hidden border border-white/10 bg-white/[0.04] hover:border-amber-300/60"
+                          >
+                            <div className="aspect-[4/5] bg-white/[0.02]">
+                              {preview ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={preview} alt={f.label} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full grid place-items-center text-[11px] text-white/60">
+                                  {filterLoading ? 'Loading…' : 'Tap to preview'}
+                                </div>
+                              )}
+                            </div>
+                            <div className="px-2 py-1 text-xs text-white/80 text-center">{f.label}</div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {editTab === 'remove' && (
+                  <div className="space-y-2">
+                    <div className="text-sm text-white/80 mb-1">Background removal tolerance</div>
+                    <input
+                      type="range"
+                      min={200}
+                      max={255}
+                      step={1}
+                      value={bgTolerance}
+                      onChange={(e) => setBgTolerance(Number(e.target.value))}
+                      className="w-full"
+                    />
+                    <div className="text-xs text-white/60">Tolerance: {bgTolerance}</div>
+                    <div className="mt-2">
+                      <button
                         onClick={async () => {
-                          if (!editingUrl) return
+                          const source = editingOriginalUrl || editingUrl || editingBaseUrl
+                          if (!source) return
                           try {
                             setBgIsProcessing(true)
                             setBgError(null)
-                            const res = await fetch('/api/images/postprocess', {
+                            const res = await fetch('/api/images/remove-bg', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ url: editingUrl, operations: [key] }),
+                              body: JSON.stringify({ url: source, threshold: bgTolerance }),
                             })
                             if (res.ok) {
                               const j = await res.json()
-                              const outUrl = j?.url || null
-                              if (outUrl) {
-                                setDesignUrl(outUrl)
-                                setEditingUrl(outUrl)
+                              const baseUrl = j?.url || null
+                              const signedUrl = j?.signedUrl || null
+                              const preview = signedUrl || (baseUrl ? `${baseUrl}?t=${Date.now()}` : null)
+                              if (preview) {
+                                setEditingUrl(preview)
                               }
                             }
                           } catch (e: any) {
@@ -1107,16 +1324,57 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                             setBgIsProcessing(false)
                           }
                         }}
-                        className="px-2 py-1.5 text-xs rounded-md border border-white/10 hover:bg-white/[0.06]"
+                        disabled={bgIsProcessing}
+                        className="px-3 py-2 rounded-md bg-white text-black hover:opacity-90"
                       >
-                        {label}
+                        {bgIsProcessing ? 'Processing…' : 'Apply remove background'}
                       </button>
-                    ))}
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {editTab === 'ai' && (
+                  <div className="space-y-2">
+                    <label className="text-sm text-white/70">Describe the edit (AI)</label>
+                    <textarea
+                      value={editPrompt}
+                      onChange={(e) => setEditPrompt(e.target.value)}
+                      rows={5}
+                      placeholder="e.g., clean stray edges, increase contrast, refine lines"
+                      className="w-full mt-1 rounded-lg bg-white/[0.04] border border-white/10 p-2 outline-none"
+                    />
+                    <div className="flex items-center gap-2">
+                      <button disabled={isSubmittingEdit || !editPrompt.trim()} onClick={submitEdit} className="px-3 py-2 rounded bg-blue-500 hover:bg-blue-600 disabled:opacity-50">
+                        {isSubmittingEdit ? 'Applying…' : 'Apply AI edit'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {editError && <div className="text-rose-300 text-xs">{editError}</div>}
                 {bgError && <div className="text-rose-300 text-xs">{bgError}</div>}
                 <div className="pt-2 flex items-center gap-2">
+                  <button
+                    onClick={applyCurrentEdit}
+                    disabled={!editingUrl}
+                    className="px-3 py-2 rounded bg-amber-300 text-black hover:bg-amber-200 disabled:opacity-60"
+                  >
+                    Apply to product
+                  </button>
+                  <button
+                    onClick={resetToApplied}
+                    disabled={!appliedDesignUrl}
+                    className="px-3 py-2 rounded border border-white/15 hover:bg-white/[0.06] disabled:opacity-50"
+                  >
+                    Reset
+                  </button>
+                  <button
+                    onClick={resetEditing}
+                    disabled={!editingBaseUrl}
+                    className="px-3 py-2 rounded border border-white/15 hover:bg-white/[0.06] disabled:opacity-50"
+                  >
+                    Reset to original
+                  </button>
                   <button onClick={() => setIsEditing(false)} className="px-3 py-2 rounded border border-white/15">Close</button>
                 </div>
               </div>
@@ -1158,11 +1416,6 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                 ) : (
                   <div className="w-full h-[320px] grid place-items-center text-xs text-white/60">No preview</div>
                 )}
-                {(bgResultUrl || bgTargetUrl) && (
-                  <div className="mt-2 text-[11px] text-white/60 break-all">
-                    Preview URL: {bgResultUrl || bgTargetUrl}
-                  </div>
-                )}
               </div>
               <div>
                 <div className="text-sm text-white/80 mb-2">Remove white background?</div>
@@ -1196,6 +1449,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                   {!!bgResultUrl && (
                     <button
                       onClick={() => {
+                        setDesignOriginalUrl((prev) => prev || bgTargetUrl)
                         setDesignUrl(bgResultUrl)
                         onFitArea()
                         setShowBgPrompt(false)
