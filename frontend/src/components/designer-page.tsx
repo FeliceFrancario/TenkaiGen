@@ -119,15 +119,37 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     rotateDeg: 0,
     flipH: false,
     flipV: false,
+    cropInset: 0,
   })
+  const previewReqRef = useRef(0)
+  const adjustDebounceRef = useRef<NodeJS.Timeout | null>(null)
+  const canvasWidthRef = useRef<number | null>(null)
+  const [showMobileTools, setShowMobileTools] = useState(false)
+  const [showToolsPanel, setShowToolsPanel] = useState(true)
 
   const startEditing = (url: string) => {
-    const original = designOriginalUrl || url
-    setDesignOriginalUrl((prev) => prev || url)
-    setEditingBaseUrl(original)
-    setEditingOriginalUrl(original)
+    setDesignOriginalUrl(url) // ensure baseline matches the currently selected design
+    setEditingBaseUrl(url)
+    setEditingOriginalUrl(url)
     setEditingUrl(url)
     setAppliedDesignUrl(designUrl || url)
+    setAdjustments({
+      exposure: 0,
+      contrast: 0,
+      highlights: 0,
+      shadows: 0,
+      saturation: 0,
+      vibrance: 0,
+      warmth: 0,
+      tint: 0,
+      rotateDeg: 0,
+      flipH: false,
+      flipV: false,
+      cropInset: 0,
+    })
+    setFilterPreviews({})
+    setFilterLoading(false)
+    setEditTab('adjust')
     setEditPrompt('')
     setEditError(null)
     setBgError(null)
@@ -161,8 +183,9 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   }
 
   const runPostprocessPreview = async (ops: any[]) => {
-    const source = editingOriginalUrl || editingUrl || editingBaseUrl || designOriginalUrl || designUrl
+    const source = editingOriginalUrl || designOriginalUrl || editingUrl || designUrl || editingBaseUrl
     if (!source) return
+    const reqId = ++previewReqRef.current
     try {
       setIsPreviewing(true)
       setBgError(null)
@@ -179,7 +202,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       const baseUrl = j?.url || null
       const signedUrl = j?.signedUrl || null
       const preview = signedUrl || (baseUrl ? `${baseUrl}?t=${Date.now()}` : null)
-      if (preview) {
+      if (preview && reqId === previewReqRef.current) {
         setEditingUrl(preview)
       }
     } catch (e: any) {
@@ -201,8 +224,22 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       warmth: adjustments.warmth,
       hue: adjustments.tint,
     }]
+    if (adjustments.cropInset > 0) ops.push({ type: 'cropPercent', inset: adjustments.cropInset })
     if (adjustments.rotateDeg) ops.push({ type: 'rotate', degrees: adjustments.rotateDeg })
     if (adjustments.flipH || adjustments.flipV) ops.push({ type: 'flip', horizontal: adjustments.flipH, vertical: adjustments.flipV })
+    const hasChange = ops.some((op) => {
+      if (op.type === 'adjust') {
+        return op.exposure || op.contrast || op.highlights || op.shadows || op.saturation || op.vibrance || op.warmth || op.hue
+      }
+      if (op.type === 'cropPercent') return op.inset
+      if (op.type === 'rotate') return op.degrees
+      if (op.type === 'flip') return op.horizontal || op.vertical
+      return false
+    })
+    if (!hasChange && editingOriginalUrl) {
+      setEditingUrl(editingOriginalUrl)
+      return
+    }
     await runPostprocessPreview(ops)
   }
 
@@ -250,7 +287,19 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     }
   }, [editTab, filterPreviews, filterLoading])
 
+  useEffect(() => {
+    if (!isEditing || editTab !== 'adjust') return
+    if (adjustDebounceRef.current) clearTimeout(adjustDebounceRef.current)
+    adjustDebounceRef.current = setTimeout(() => {
+      runAdjustPreview()
+    }, 220)
+    return () => {
+      if (adjustDebounceRef.current) clearTimeout(adjustDebounceRef.current)
+    }
+  }, [adjustments, editTab, isEditing])
+
   const openAddToProduct = (url: string) => {
+    setShowToolsPanel(false)
     setBgTargetUrl(url)
     setBgTolerance(245)
     setBgError(null)
@@ -603,6 +652,46 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
     }
   }, [templates, placement, layoutTemplate, designDims])
 
+  // Keep design aligned when canvas resizes (responsive widths)
+  useEffect(() => {
+    if (!canvasRef.current) return
+    const el = canvasRef.current
+    const handle = (w: number) => {
+      if (canvasWidthRef.current && w > 0) {
+        const factor = w / canvasWidthRef.current
+        if (Math.abs(factor - 1) > 0.02) {
+          setDesignRect((r) => ({
+            x: Math.round(r.x * factor),
+            y: Math.round(r.y * factor),
+            w: Math.round(r.w * factor),
+            h: Math.round(r.h * factor),
+            r: r.r,
+          }))
+        }
+      }
+      canvasWidthRef.current = w
+    }
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) handle(entry.contentRect.width)
+    })
+    ro.observe(el)
+    handle(el.clientWidth)
+    return () => {
+      ro.disconnect()
+    }
+  }, [])
+
+  // Toggle tools panel default based on viewport (show on desktop, collapsed on mobile)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const sync = () => setShowToolsPanel(mq.matches)
+    sync()
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [])
+
   // Initial clear when the designer mounts so no design is preselected
   useEffect(() => {
     setDesignUrl('')
@@ -723,6 +812,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
 
   const onWheel: React.WheelEventHandler<HTMLDivElement> = (e) => {
     e.preventDefault()
+    e.stopPropagation()
     const factor = e.deltaY < 0 ? 1.05 : 0.95
     setDesignRect((r) => {
       const nw = Math.max(24, r.w * factor)
@@ -744,6 +834,57 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
         y: Math.min(Math.max(r.y, tpl.y + 2), Math.max(tpl.y + 2, maxY)),
       }
     })
+  }
+
+  const clampRectToTemplate = (rect: typeof designRect) => {
+    const tpl = getTemplate(placement)
+    if (!tpl) return rect
+    const min = 24
+    const maxW = tpl.width - 4
+    const maxH = tpl.height - 4
+    let w = Math.min(Math.max(rect.w, min), maxW)
+    let h = Math.min(Math.max(rect.h, min), maxH)
+    let x = Math.min(Math.max(rect.x, tpl.x + 2), tpl.x + tpl.width - w - 2)
+    let y = Math.min(Math.max(rect.y, tpl.y + 2), tpl.y + tpl.height - h - 2)
+    return { x, y, w, h, r: rect.r }
+  }
+
+  const onResizeHandle = (corner: 'nw' | 'ne' | 'sw' | 'se') => (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startY = e.clientY
+    const start = { ...designRect }
+    const move = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX
+      const dy = ev.clientY - startY
+      let next = { ...start }
+      if (corner === 'se') {
+        next.w = start.w + dx
+        next.h = start.h + dy
+      } else if (corner === 'ne') {
+        next.w = start.w + dx
+        next.h = start.h - dy
+        next.y = start.y + dy
+      } else if (corner === 'sw') {
+        next.w = start.w - dx
+        next.h = start.h + dy
+        next.x = start.x + dx
+      } else if (corner === 'nw') {
+        next.w = start.w - dx
+        next.h = start.h - dy
+        next.x = start.x + dx
+        next.y = start.y + dy
+      }
+      next = clampRectToTemplate(next)
+      setDesignRect(next)
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
   }
 
   const onRotateClick = () => {
@@ -924,7 +1065,15 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
           )}
         </div>
       )}
-      <div className="mb-3">
+      {/* Mobile tools toggle pinned to left to avoid auth buttons overlap */}
+      <button
+        onClick={() => setShowToolsPanel((v) => !v)}
+        className="fixed left-3 top-24 z-30 lg:hidden inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/70 px-3 py-2 text-xs shadow-lg backdrop-blur-md"
+      >
+        <Sparkles className="w-4 h-4" />
+        {showToolsPanel ? 'Hide tools' : 'Show tools'}
+      </button>
+      <div className="mb-3 flex items-center justify-between gap-3">
         <button
           onClick={() => {
             // Use replace to avoid back button issues
@@ -936,9 +1085,10 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
           <span className="text-sm">Back to product</span>
         </button>
       </div>
-      <div className="grid grid-cols-[72px_420px_minmax(0,1fr)] gap-5">
+      {/* Responsive layout: stack on small, 3-column on large */}
+      <div className="grid grid-cols-1 lg:grid-cols-[72px_420px_minmax(0,1fr)] gap-5">
         {/* Vertical icon sidebar */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-2 flex flex-col items-center gap-2">
+        <div className={`rounded-2xl border border-white/10 bg-white/[0.03] p-2 items-center justify-center gap-2 lg:flex-col w-full lg:w-auto ${showToolsPanel ? 'flex' : 'hidden lg:flex'}`}>
           <button
             title="AI"
             onClick={() => setActiveTab('ai')}
@@ -962,8 +1112,8 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
           </button>
         </div>
 
-        {/* Left content panel per tab */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+        {/* Left content panel per tab (visible on all breakpoints) */}
+        <div className={`rounded-2xl border border-white/10 bg-white/[0.03] p-4 w-full ${showToolsPanel ? 'block' : 'hidden lg:block'}`}>
           {activeTab === 'ai' && (
             <div className="flex flex-col gap-4">
               <div>
@@ -1122,6 +1272,7 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                 ref={designRef}
                 onMouseDown={onDrag}
                 onWheel={onWheel}
+                onWheelCapture={onWheel}
                 style={{ position: 'absolute', left: designRect.x, top: designRect.y, width: designRect.w, height: designRect.h, transform: `rotate(${designRect.r}deg)` }}
                 className={`group rounded-md ${isMoving ? 'cursor-grabbing border-2 border-white/50' : 'cursor-grab border border-transparent hover:border-white/30'}`}
               >
@@ -1131,6 +1282,11 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                 ) : (
                   <div className="w-full h-full grid place-items-center text-xs text-white/50">Pick a design</div>
                 )}
+                {/* Resize handles */}
+                <div onMouseDown={onResizeHandle('nw')} className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-white shadow cursor-nw-resize opacity-0 group-hover:opacity-100" />
+                <div onMouseDown={onResizeHandle('ne')} className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-white shadow cursor-ne-resize opacity-0 group-hover:opacity-100" />
+                <div onMouseDown={onResizeHandle('sw')} className="absolute -bottom-2 -left-2 w-4 h-4 rounded-full bg-white shadow cursor-sw-resize opacity-0 group-hover:opacity-100" />
+                <div onMouseDown={onResizeHandle('se')} className="absolute -bottom-2 -right-2 w-4 h-4 rounded-full bg-white shadow cursor-se-resize opacity-0 group-hover:opacity-100" />
                 {/* Floating edit button over the design */}
                 {designUrl && (
                   <button
@@ -1228,20 +1384,27 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
                         <button onClick={() => setAdjustments((a) => ({ ...a, rotateDeg: 0 }))} className="px-2 py-1 rounded border border-white/10 hover:bg-white/[0.06]">Reset</button>
                         <button onClick={() => setAdjustments((a) => ({ ...a, rotateDeg: a.rotateDeg + 90 }))} className="px-2 py-1 rounded border border-white/10 hover:bg-white/[0.06]">+90°</button>
                       </div>
+                      <div className="mt-3">
+                        <div className="flex justify-between text-xs text-white/70 mb-1">
+                          <span>Crop inset (%)</span>
+                          <span>{adjustments.cropInset}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={25}
+                          step={1}
+                          value={adjustments.cropInset}
+                          onChange={(e) => setAdjustments((a) => ({ ...a, cropInset: Number(e.target.value) }))}
+                          className="w-full"
+                        />
+                      </div>
                       <div className="flex gap-2 mt-2 text-xs">
                         <button onClick={() => setAdjustments((a) => ({ ...a, flipH: !a.flipH }))} className={`px-3 py-1 rounded border ${adjustments.flipH ? 'border-amber-400/60 bg-white/[0.10]' : 'border-white/10 hover:bg-white/[0.06]'}`}>Flip H</button>
                         <button onClick={() => setAdjustments((a) => ({ ...a, flipV: !a.flipV }))} className={`px-3 py-1 rounded border ${adjustments.flipV ? 'border-amber-400/60 bg-white/[0.10]' : 'border-white/10 hover:bg-white/[0.06]'}`}>Flip V</button>
                       </div>
                     </div>
-                    <div className="pt-1">
-                      <button
-                        onClick={runAdjustPreview}
-                        disabled={isPreviewing}
-                        className="px-3 py-2 rounded bg-white text-black hover:opacity-90 disabled:opacity-60"
-                      >
-                        {isPreviewing ? 'Previewing…' : 'Preview adjustments'}
-                      </button>
-                    </div>
+                    <div className="text-[11px] text-white/50">Adjustments apply live as you drag.</div>
                   </div>
                 )}
 

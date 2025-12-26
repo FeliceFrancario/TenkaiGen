@@ -31,6 +31,13 @@ export async function POST(req: Request) {
 
     const sharp = (await import('sharp')).default
     let img = sharp(inputBuf).ensureAlpha()
+    let meta: import('sharp').Metadata | null = null
+    const ensureMeta = async () => {
+      if (!meta) {
+        meta = await img.metadata()
+      }
+      return meta
+    }
 
     const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max)
 
@@ -38,6 +45,8 @@ export async function POST(req: Request) {
     // Supported ops (objects): { type: 'adjust', exposure?, contrast?, saturation?, vibrance?, warmth?, hue?, tint?, shadows?, highlights? }
     //                          { type: 'rotate', degrees }
     //                          { type: 'flip', horizontal?, vertical? }
+    //                          { type: 'crop', x,y,width,height }
+    //                          { type: 'cropPercent', inset } // inset percent 0-45 trimmed equally from each edge
     for (const op of operations) {
       if (typeof op === 'string') {
         switch (op) {
@@ -127,6 +136,23 @@ export async function POST(req: Request) {
         img = img.extract({ left: Math.floor(x), top: Math.floor(y), width: Math.floor(width), height: Math.floor(height) })
         continue
       }
+
+      if (op && typeof op === 'object' && op.type === 'cropPercent') {
+        const insetPct = clamp(Number(op.inset ?? 0), 0, 45)
+        if (insetPct > 0) {
+          const m = await ensureMeta()
+          const w = m.width || 0
+          const h = m.height || 0
+          if (w > 1 && h > 1) {
+            const dx = Math.floor((w * insetPct) / 100)
+            const dy = Math.floor((h * insetPct) / 100)
+            const width = Math.max(1, w - dx * 2)
+            const height = Math.max(1, h - dy * 2)
+            img = img.extract({ left: dx, top: dy, width, height })
+          }
+        }
+        continue
+      }
     }
 
     const outBuf = await img.png({ compressionLevel: 9 }).toBuffer()
@@ -153,7 +179,13 @@ export async function POST(req: Request) {
     const filename = lastSlash >= 0 ? path.slice(lastSlash + 1) : path
     const dirname = lastSlash >= 0 ? path.slice(0, lastSlash) : ''
     const base = filename.replace(/\.[^.]+$/, '')
-    const suffix = operations.join('-')
+    const suffix = operations
+      .map((op: any) => {
+        if (typeof op === 'string') return op
+        if (op && typeof op === 'object' && op.type) return op.type
+        return 'op'
+      })
+      .join('-')
     const outKey = dirname ? `${dirname}/${base}_pp_${suffix}.png` : `${base}_pp_${suffix}.png`
 
     const bucketResolved = bucket || envBucket
