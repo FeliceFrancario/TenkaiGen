@@ -47,13 +47,13 @@ Interactive print-on-demand designer with AI prompt parsing, direct Gemini image
 - Tests/QA coverage and error reporting.
 
 ## Screenshots
-Images are located in `data/Screenshots/`:
+Images are located in `data/screenshots/`:
 - Designer canvas with tools, prompt panel, and applied design  
-  `![Designer](data/Screenshots/designer.png)`
+  `![Designer](data/screenshots/designer.png)`
 - Product detail page with mockup selector and “Start designing” CTA  
-  `![Product Detail](data/Screenshots/product-detail.png)`
+  `![Product Detail](data/screenshots/product-detail.png)`
 - Catalog grid with filters and country selector  
-  `![Catalog](data/Screenshots/catalog.png)`
+  `![Catalog](data/screenshots/catalog.png)`
 - Landing page hero with prompt input  
-  `![Landing](data/Screenshots/landing.png)`
+  `![Landing](data/screenshots/landing.png)`
 
