@@ -299,7 +299,9 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
   }, [adjustments, editTab, isEditing])
 
   const openAddToProduct = (url: string) => {
-    setShowToolsPanel(false)
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setShowToolsPanel(false)
+    }
     setBgTargetUrl(url)
     setBgTolerance(245)
     setBgError(null)
@@ -1088,32 +1090,32 @@ export default function DesignerPage({ productId, product, initialSearch }: Desi
       {/* Responsive layout: stack on small, 3-column on large */}
       <div className="grid grid-cols-1 lg:grid-cols-[72px_420px_minmax(0,1fr)] gap-5">
         {/* Vertical icon sidebar */}
-        <div className={`rounded-2xl border border-white/10 bg-white/[0.03] p-2 items-center justify-center gap-2 lg:flex-col w-full lg:w-auto ${showToolsPanel ? 'flex' : 'hidden lg:flex'}`}>
+        <div className={`rounded-2xl border border-white/10 bg-white/[0.03] p-2 items-center gap-2 lg:flex-col w-full lg:w-auto ${showToolsPanel ? 'flex' : 'hidden'} lg:flex`}>
           <button
             title="AI"
             onClick={() => setActiveTab('ai')}
-            className={`${activeTab==='ai' ? 'border-amber-400/40 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'} w-10 h-10 flex items-center justify-center rounded-lg border`}
+            className={`${activeTab==='ai' ? 'border-amber-400/40 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'} w-10 h-10 flex items-center justify-center rounded-lg border self-start`}
           >
             <Sparkles className="w-5 h-5" />
           </button>
           <button
             title="Uploads"
             onClick={() => setActiveTab('uploads')}
-            className={`${activeTab==='uploads' ? 'border-amber-400/40 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'} w-10 h-10 flex items-center justify-center rounded-lg border`}
+            className={`${activeTab==='uploads' ? 'border-amber-400/40 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'} w-10 h-10 flex items-center justify-center rounded-lg border self-start`}
           >
             <Upload className="w-5 h-5" />
           </button>
           <button
             title="Text"
             onClick={() => setActiveTab('text')}
-            className={`${activeTab==='text' ? 'border-amber-400/40 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'} w-10 h-10 flex items-center justify-center rounded-lg border`}
+            className={`${activeTab==='text' ? 'border-amber-400/40 bg-white/[0.10]' : 'border-white/10 hover:border-white/20 bg-white/[0.05]'} w-10 h-10 flex items-center justify-center rounded-lg border self-start`}
           >
             <TypeIcon className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Left content panel per tab (visible on all breakpoints) */}
-        <div className={`rounded-2xl border border-white/10 bg-white/[0.03] p-4 w-full ${showToolsPanel ? 'block' : 'hidden lg:block'}`}>
+        {/* Left content panel per tab (visible on all breakpoints; always on desktop) */}
+        <div className={`rounded-2xl border border-white/10 bg-white/[0.03] p-4 w-full ${showToolsPanel ? 'block' : 'hidden'} lg:block`}>
           {activeTab === 'ai' && (
             <div className="flex flex-col gap-4">
               <div>
